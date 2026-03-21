@@ -1,0 +1,29 @@
+# Build outputs
+bin/
+obj/
+
+# IDE and user-specific files
+.vs/
+.vscode/
+*.user
+*.rsuser
+*.suo
+
+# Test outputs
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# Packages and publish artifacts
+artifacts/
+release/
+*.nupkg
+*.snupkg
+
+# Local scratch and experiments
+scratch/
+
+# OS files
+Thumbs.db
+Desktop.ini

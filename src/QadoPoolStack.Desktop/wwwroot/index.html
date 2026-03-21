@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qado Pool Login</title>
+  <link rel="stylesheet" href="/app.css?v=20260320c">
+</head>
+<body data-page="login">
+  <div class="backdrop"></div>
+  <main class="shell auth-shell">
+    <section class="hero">
+      <h1>Qado Pool:</h1>
+    </section>
+
+    <p id="notice" class="notice page-notice hidden" aria-live="polite"></p>
+
+    <section class="auth-stage">
+      <article class="card auth-card">
+        <h2>Login</h2>
+        <form id="loginForm">
+          <label>Username<input name="username" required></label>
+          <label>Password<input name="password" type="password" required></label>
+          <button type="submit">Sign in</button>
+        </form>
+        <p class="auth-link-row">
+          <a id="createAccountLink" href="/register">Create account</a>
+        </p>
+      </article>
+    </section>
+  </main>
+
+  <script src="/app.js?v=20260320c" defer></script>
+</body>
+</html>

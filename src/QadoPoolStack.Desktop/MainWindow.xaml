@@ -1,0 +1,526 @@
+<Window x:Class="QadoPoolStack.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Qado Pool Stack"
+        Width="1480"
+        Height="980"
+        MinWidth="1280"
+        MinHeight="820"
+        Loaded="Window_Loaded">
+    <DockPanel Margin="12">
+        <StackPanel DockPanel.Dock="Top"
+                    Margin="0,0,0,12">
+            <TextBlock Text="Qado Pool Stack"
+                       FontSize="24"
+                       FontWeight="Bold" />
+            <TextBlock Margin="0,4,0,12"
+                       Text="Desktop administration UI for the Qado pool server, accounting, withdrawals and TLS operations."
+                       TextWrapping="Wrap" />
+            <WrapPanel>
+                <Button x:Name="RefreshButton"
+                        Width="110"
+                        Margin="0,0,8,0"
+                        Click="RefreshButton_Click"
+                        Content="Refresh" />
+                <Button x:Name="ServerToggleButton"
+                        Width="120"
+                        Margin="0,0,8,0"
+                        Click="ServerToggleButton_Click"
+                        Content="Start Server" />
+                <Button x:Name="AccountRegistrationToggleButton"
+                        Width="190"
+                        Click="AccountRegistrationToggleButton_Click"
+                        Content="Disable Account Creation" />
+            </WrapPanel>
+        </StackPanel>
+
+        <TabControl>
+            <TabItem Header="Server">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <GroupBox Grid.Row="0"
+                                  Grid.Column="0"
+                                  Margin="0,0,8,8"
+                                  Header="HTTP + Pool Settings">
+                            <Grid Margin="10">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Grid.Row="0"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="Qado node URL" />
+                                <TextBox x:Name="NodeUrlTextBox"
+                                         Grid.Row="0"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8" />
+
+                                <TextBlock Grid.Row="1"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="HTTP port" />
+                                <TextBox x:Name="HttpPortTextBox"
+                                         Grid.Row="1"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8" />
+
+                                <TextBlock Grid.Row="2"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="HTTPS port" />
+                                <TextBox x:Name="HttpsPortTextBox"
+                                         Grid.Row="2"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8" />
+
+                                <CheckBox x:Name="EnableHttpsCheckBox"
+                                          Grid.Row="3"
+                                          Grid.Column="1"
+                                          Margin="0,0,0,8"
+                                          Content="Enable HTTPS listener" />
+
+                                <CheckBox x:Name="PreferHttpsWhenAvailableCheckBox"
+                                          Grid.Row="4"
+                                          Grid.Column="1"
+                                          Margin="0,0,0,8"
+                                          Content="Prefer HTTPS in status and links when available" />
+
+                                <TextBlock Grid.Row="5"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="Default share difficulty" />
+                                <TextBox x:Name="DefaultDifficultyTextBox"
+                                         Grid.Row="5"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8" />
+
+                                <TextBlock Grid.Row="6"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="Share submit rate limit / minute" />
+                                <TextBox x:Name="ShareRateLimitTextBox"
+                                         Grid.Row="6"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8" />
+
+                                <TextBlock Grid.Row="7"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="Pool fee (basis points)" />
+                                <TextBox x:Name="PoolFeeTextBox"
+                                         Grid.Row="7"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8" />
+
+                                <StackPanel Grid.Row="8"
+                                            Grid.Column="1"
+                                            Orientation="Horizontal">
+                                    <Button x:Name="SaveSettingsButton"
+                                            Width="120"
+                                            Margin="0,0,8,0"
+                                            Click="SaveSettingsButton_Click"
+                                            Content="Save Settings" />
+                                    <TextBlock x:Name="ServerStatusTextBlock"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
+                        </GroupBox>
+
+                        <GroupBox Grid.Row="0"
+                                  Grid.Column="1"
+                                  Margin="8,0,0,8"
+                                  Header="TLS + Pool Identity">
+                            <Grid Margin="10">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Grid.Row="0"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="Domain name" />
+                                <TextBox x:Name="DomainTextBox"
+                                         Grid.Row="0"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8" />
+
+                                <TextBlock Grid.Row="1"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="Let's Encrypt email" />
+                                <TextBox x:Name="LetsEncryptEmailTextBox"
+                                         Grid.Row="1"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8" />
+
+                                <CheckBox x:Name="LetsEncryptStagingCheckBox"
+                                          Grid.Row="2"
+                                          Grid.Column="1"
+                                          Margin="0,0,0,8"
+                                          Content="Use Let's Encrypt staging" />
+
+                                <TextBlock Grid.Row="3"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="Certificate path" />
+                                <TextBox x:Name="CertificatePathTextBox"
+                                         Grid.Row="3"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8" />
+
+                                <TextBlock Grid.Row="4"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="Pool mining public key" />
+                                <TextBox x:Name="PoolPublicKeyTextBox"
+                                         Grid.Row="4"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8"
+                                         IsReadOnly="True" />
+
+                                <TextBlock Grid.Row="5"
+                                           Grid.Column="0"
+                                           Margin="0,0,12,8"
+                                           VerticalAlignment="Center"
+                                           Text="Pool mining private key" />
+                                <TextBox x:Name="PoolPrivateKeyTextBox"
+                                         Grid.Row="5"
+                                         Grid.Column="1"
+                                         Margin="0,0,0,8" />
+
+                                <WrapPanel Grid.Row="6"
+                                           Grid.Column="1"
+                                           Margin="0,0,0,8">
+                                    <Button x:Name="GeneratePoolKeyButton"
+                                            Width="140"
+                                            Margin="0,0,8,0"
+                                            Click="GeneratePoolKeyButton_Click"
+                                            Content="Generate Pool Key" />
+                                    <Button x:Name="AcceptPoolKeyButton"
+                                            Width="110"
+                                            Margin="0,0,8,0"
+                                            Click="AcceptPoolKeyButton_Click"
+                                            Content="Accept" />
+                                    <Button x:Name="DeletePoolKeyButton"
+                                            Width="120"
+                                            Margin="0,0,8,0"
+                                            Click="DeletePoolKeyButton_Click"
+                                            Content="Delete Pool Key" />
+                                    <Button x:Name="AcquireTlsButton"
+                                            Width="140"
+                                            Click="AcquireTlsButton_Click"
+                                            Content="Acquire TLS Cert" />
+                                </WrapPanel>
+
+                                <TextBlock Grid.Row="7"
+                                           Grid.Column="1"
+                                           Text="For HTTP-01 validation, expose the configured HTTP port publicly and point the domain to this host."
+                                           TextWrapping="Wrap" />
+                            </Grid>
+                        </GroupBox>
+
+                        <GroupBox Grid.Row="1"
+                                  Grid.ColumnSpan="2"
+                                  Header="Status Summary">
+                            <Grid Margin="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0"
+                                            Margin="0,0,8,0">
+                                    <TextBlock FontWeight="Bold"
+                                               Text="Server" />
+                                    <TextBlock x:Name="SummaryServerTextBlock"
+                                               FontSize="18"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1"
+                                            Margin="8,0">
+                                    <TextBlock FontWeight="Bold"
+                                               Text="Current Round" />
+                                    <TextBlock x:Name="SummaryRoundTextBlock"
+                                               FontSize="18" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2"
+                                            Margin="8,0">
+                                    <TextBlock FontWeight="Bold"
+                                               Text="Tracked Balance" />
+                                    <TextBlock x:Name="SummaryTrackedBalanceTextBlock"
+                                               FontSize="18" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="3"
+                                            Margin="8,0,0,0">
+                                    <TextBlock FontWeight="Bold"
+                                               Text="Pending Withdrawals" />
+                                    <TextBlock x:Name="SummaryWithdrawalCountTextBlock"
+                                               FontSize="18" />
+                                </StackPanel>
+                            </Grid>
+                        </GroupBox>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Overview">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <GroupBox Grid.Row="0"
+                              Grid.Column="0"
+                              Margin="0,0,8,8"
+                              Header="Recent Rounds">
+                        <DataGrid x:Name="RoundsDataGrid"
+                                  Margin="8"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  IsReadOnly="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Width="90"
+                                                    Binding="{Binding Height}"
+                                                    Header="Height" />
+                                <DataGridTextColumn Width="*"
+                                                    Binding="{Binding PrevHash}"
+                                                    Header="Prev Hash" />
+                                <DataGridTextColumn Width="100"
+                                                    Binding="{Binding Status}"
+                                                    Header="Status" />
+                                <DataGridTextColumn Width="180"
+                                                    Binding="{Binding OpenedUtc}"
+                                                    Header="Opened" />
+                                <DataGridTextColumn Width="180"
+                                                    Binding="{Binding ClosedUtc}"
+                                                    Header="Closed" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <GroupBox Grid.Row="0"
+                              Grid.Column="1"
+                              Margin="8,0,0,8"
+                              Header="Accepted Blocks">
+                        <DataGrid x:Name="BlocksDataGrid"
+                                  Margin="8"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  IsReadOnly="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Width="90"
+                                                    Binding="{Binding Height}"
+                                                    Header="Height" />
+                                <DataGridTextColumn Width="120"
+                                                    Binding="{Binding Reward}"
+                                                    Header="Reward" />
+                                <DataGridTextColumn Width="*"
+                                                    Binding="{Binding Hash}"
+                                                    Header="Hash" />
+                                <DataGridTextColumn Width="180"
+                                                    Binding="{Binding AcceptedUtc}"
+                                                    Header="Accepted" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <GroupBox Grid.Row="1"
+                              Grid.ColumnSpan="2"
+                              Header="Overview Summary">
+                        <Grid Margin="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0"
+                                        Margin="0,0,8,0">
+                                <TextBlock FontWeight="Bold"
+                                           Text="Users" />
+                                <TextBlock x:Name="SummaryUsersTextBlock"
+                                           FontSize="18" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1"
+                                        Margin="8,0">
+                                <TextBlock FontWeight="Bold"
+                                           Text="Verified Miners" />
+                                <TextBlock x:Name="SummaryMinersTextBlock"
+                                           FontSize="18" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2"
+                                        Margin="8,0">
+                                <TextBlock FontWeight="Bold"
+                                           Text="Open Round Shares" />
+                                <TextBlock x:Name="SummarySharesTextBlock"
+                                           FontSize="18" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="3"
+                                        Margin="8,0,0,0">
+                                <TextBlock FontWeight="Bold"
+                                           Text="Prev Hash" />
+                                <TextBlock x:Name="SummaryPrevHashTextBlock"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Users &amp; Withdrawals">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <GroupBox Grid.Row="0"
+                              Margin="0,0,0,8"
+                              Header="Users">
+                            <DataGrid x:Name="UsersDataGrid"
+                                  Margin="8"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  IsReadOnly="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Width="140"
+                                                    Binding="{Binding Username}"
+                                                    Header="User" />
+                                <DataGridTextColumn Width="110"
+                                                    Binding="{Binding Available}"
+                                                    Header="Available" />
+                                <DataGridTextColumn Width="110"
+                                                    Binding="{Binding Pending}"
+                                                    Header="Pending" />
+                                <DataGridTextColumn Width="110"
+                                                    Binding="{Binding Deposited}"
+                                                    Header="Deposited" />
+                                <DataGridTextColumn Width="110"
+                                                    Binding="{Binding Mined}"
+                                                    Header="Mined" />
+                                <DataGridTextColumn Width="110"
+                                                    Binding="{Binding Withdrawn}"
+                                                    Header="Withdrawn" />
+                                <DataGridTextColumn Width="*"
+                                                    Binding="{Binding WithdrawalAddress}"
+                                                    Header="Withdrawal Address" />
+                                <DataGridTemplateColumn Width="120"
+                                                        Header="Action">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Button Width="96"
+                                                    Padding="8,2"
+                                                    Click="WithdrawAllUserButton_Click"
+                                                    Content="Withdraw All"
+                                                    IsEnabled="{Binding CanWithdraw}" />
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <GroupBox Grid.Row="1"
+                              Header="Withdrawals">
+                        <DataGrid x:Name="WithdrawalsDataGrid"
+                                  Margin="10"
+                                  Height="260"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  IsReadOnly="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Width="220"
+                                                    Binding="{Binding WithdrawalId}"
+                                                    Header="Request Id" />
+                                <DataGridTextColumn Width="120"
+                                                    Binding="{Binding Username}"
+                                                    Header="User" />
+                                <DataGridTextColumn Width="110"
+                                                    Binding="{Binding Amount}"
+                                                    Header="Amount" />
+                                <DataGridTextColumn Width="*"
+                                                    Binding="{Binding Address}"
+                                                    Header="Address" />
+                                <DataGridTextColumn Width="*"
+                                                    Binding="{Binding TxId}"
+                                                    Header="Tx Id" />
+                                <DataGridTextColumn Width="120"
+                                                    Binding="{Binding Status}"
+                                                    Header="Status" />
+                                <DataGridTextColumn Width="180"
+                                                    Binding="{Binding RequestedUtc}"
+                                                    Header="Requested" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Logs">
+                <GroupBox Margin="8"
+                          Header="Recent Log Entries">
+                    <ListBox x:Name="LogsListBox"
+                             Margin="8" />
+                </GroupBox>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

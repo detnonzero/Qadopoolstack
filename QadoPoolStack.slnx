@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/QadoPoolStack.Desktop/QadoPoolStack.Desktop.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/QadoPoolStack.Desktop.Tests/QadoPoolStack.Desktop.Tests.csproj" />
+  </Folder>
+</Solution>
