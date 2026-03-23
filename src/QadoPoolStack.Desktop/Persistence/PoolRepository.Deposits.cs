@@ -175,6 +175,7 @@ public sealed partial class PoolRepository
                 public_key_hex,
                 share_difficulty,
                 api_token_hash_hex,
+                api_token_text,
                 is_verified,
                 verified_utc,
                 last_job_utc,

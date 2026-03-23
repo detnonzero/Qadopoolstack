@@ -183,7 +183,10 @@ public partial class MainWindow : Window
             await _runtime.SaveSettingsAsync(ReadSettingsFromForm()).ConfigureAwait(true);
             await _runtime.AcquireTlsCertificateAsync().ConfigureAwait(true);
             LoadSettingsIntoForm();
-            await DialogService.ShowAsync(this, "TLS", "Certificate acquired and saved. Restart the server to bind HTTPS with the new certificate.").ConfigureAwait(true);
+            var message = _runtime.Settings.UseLetsEncryptStaging
+                ? "Staging certificate acquired and saved. Browsers and operating systems will mark this certificate as untrusted because it is for testing only. Uncheck Let's Encrypt staging and acquire a new certificate for public HTTPS use. Restart the server to bind HTTPS with the new certificate."
+                : "Certificate acquired and saved. Restart the server to bind HTTPS with the new certificate.";
+            await DialogService.ShowAsync(this, "TLS", message).ConfigureAwait(true);
         }
         catch (Exception ex)
         {

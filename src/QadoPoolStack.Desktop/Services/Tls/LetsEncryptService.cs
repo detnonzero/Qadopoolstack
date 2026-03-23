@@ -84,7 +84,7 @@ public sealed class LetsEncryptService
         }, certificateKey).ConfigureAwait(false);
 
         var password = HexUtility.CreateTokenHex(16);
-        var pfxBytes = certificateChain.ToPfx(certificateKey).Build(domainName, password);
+        var pfxBytes = PfxCertificateExporter.Build(certificateChain, certificateKey, password);
         var certificatePath = Path.Combine(_paths.CertificatesDirectory, $"{domainName.Replace('*', '_')}.pfx");
         await File.WriteAllBytesAsync(certificatePath, pfxBytes, cancellationToken).ConfigureAwait(false);
 

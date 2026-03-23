@@ -51,7 +51,8 @@ public sealed record MeResponse(
     string? WithdrawalAddress,
     BalanceDto Balance,
     string? MinerPublicKey,
-    double? MinerDifficulty);
+    double? MinerDifficulty,
+    string? MinerApiToken);
 
 public sealed record WithdrawResponse(string WithdrawalId, string Status, string? TxId, string SentAmount, string Fee);
 

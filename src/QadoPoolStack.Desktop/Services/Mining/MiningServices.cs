@@ -438,7 +438,8 @@ public sealed class DifficultyService
         var desiredDifficulty = Math.Max(1d, estimatedHashrate * targetShareSeconds);
         var increaseCap = trigger == DifficultyRebalanceTrigger.AcceptedShare && acceptedShares.Count <= 2 ? 128d : trigger == DifficultyRebalanceTrigger.AcceptedShare ? 16d : 8d;
         var decreaseCap = trigger == DifficultyRebalanceTrigger.AcceptedShare ? 0.5d : 0.67d;
-        return Math.Clamp(desiredDifficulty, Math.Max(1d, currentDifficulty * decreaseCap), Math.Max(1d, currentDifficulty * increaseCap));
+        var cappedDifficulty = Math.Clamp(desiredDifficulty, Math.Max(1d, currentDifficulty * decreaseCap), Math.Max(1d, currentDifficulty * increaseCap));
+        return DifficultyFixedPoint.ClampNormalizedDouble(cappedDifficulty);
     }
 
     private static double ComputeEstimatedHashrate(MinerRecord miner, IReadOnlyCollection<ShareRecord> acceptedShares, DateTimeOffset sampleSince, DateTimeOffset now)

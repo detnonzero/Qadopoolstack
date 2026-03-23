@@ -258,6 +258,7 @@ public sealed class MinerAuthService
             challenge.PublicKeyHex,
             existing?.ShareDifficulty ?? settings.DefaultShareDifficulty,
             HexUtility.HashSha256Hex(rawToken),
+            rawToken,
             true,
             now,
             now,

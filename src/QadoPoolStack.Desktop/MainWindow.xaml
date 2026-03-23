@@ -195,11 +195,11 @@
                                          Grid.Column="1"
                                          Margin="0,0,0,8" />
 
-                                <CheckBox x:Name="LetsEncryptStagingCheckBox"
-                                          Grid.Row="2"
-                                          Grid.Column="1"
-                                          Margin="0,0,0,8"
-                                          Content="Use Let's Encrypt staging" />
+                                 <CheckBox x:Name="LetsEncryptStagingCheckBox"
+                                           Grid.Row="2"
+                                           Grid.Column="1"
+                                           Margin="0,0,0,8"
+                                           Content="Use Let's Encrypt staging (test only, browsers will warn)" />
 
                                 <TextBlock Grid.Row="3"
                                            Grid.Column="0"

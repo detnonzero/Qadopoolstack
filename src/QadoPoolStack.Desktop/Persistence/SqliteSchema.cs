@@ -38,6 +38,7 @@ public static class SqliteSchema
                 public_key_hex TEXT NOT NULL UNIQUE,
                 share_difficulty REAL NOT NULL,
                 api_token_hash_hex TEXT NOT NULL UNIQUE,
+                api_token_text TEXT NULL,
                 is_verified INTEGER NOT NULL,
                 verified_utc TEXT NOT NULL,
                 last_job_utc TEXT NOT NULL,
@@ -208,6 +209,7 @@ public static class SqliteSchema
         await EnsureColumnAsync(connection, "incoming_deposit_events", "ignored_utc", "TEXT NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "incoming_deposit_events", "ignore_reason", "TEXT NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "shares", "difficulty_scaled", "INTEGER NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "miners", "api_token_text", "TEXT NULL", cancellationToken).ConfigureAwait(false);
         await BackfillShareDifficultyScaledAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 

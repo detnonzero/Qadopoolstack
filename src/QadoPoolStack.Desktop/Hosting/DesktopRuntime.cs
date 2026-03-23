@@ -60,6 +60,7 @@ public sealed class DesktopRuntime
     {
         Settings = settings.Clone();
         await _settingsStore.SaveAsync(Settings, cancellationToken).ConfigureAwait(false);
+        _serverHost.ApplyRuntimeSettings(Settings);
     }
 
     public async Task SetAccountRegistrationEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
@@ -104,6 +105,7 @@ public sealed class DesktopRuntime
         Settings.PoolMinerPublicKey = publicKey;
         Settings.ProtectedPoolMinerPrivateKey = _secretProtector.Protect(privateKeyHex);
         await _settingsStore.SaveAsync(Settings, cancellationToken).ConfigureAwait(false);
+        _serverHost.ApplyRuntimeSettings(Settings);
         return publicKey;
     }
 
@@ -112,6 +114,7 @@ public sealed class DesktopRuntime
         Settings.PoolMinerPublicKey = string.Empty;
         Settings.ProtectedPoolMinerPrivateKey = string.Empty;
         await _settingsStore.SaveAsync(Settings, cancellationToken).ConfigureAwait(false);
+        _serverHost.ApplyRuntimeSettings(Settings);
     }
 
     public async Task AcquireTlsCertificateAsync(CancellationToken cancellationToken = default)

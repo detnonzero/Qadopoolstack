@@ -62,6 +62,7 @@ public sealed record MinerRecord(
     string PublicKeyHex,
     double ShareDifficulty,
     string ApiTokenHashHex,
+    string? ApiTokenText,
     bool IsVerified,
     DateTimeOffset VerifiedUtc,
     DateTimeOffset LastJobUtc,

@@ -61,6 +61,27 @@ public sealed class PoolServerHost
         _logger.Info("Server", $"Account registration {(enabled ? "enabled" : "disabled")}.");
     }
 
+    public void ApplyRuntimeSettings(PoolSettings settings)
+    {
+        if (_runningSettingsSnapshot is null)
+        {
+            return;
+        }
+
+        _runningSettingsSnapshot.PoolMinerPublicKey = settings.PoolMinerPublicKey;
+        _runningSettingsSnapshot.ProtectedPoolMinerPrivateKey = settings.ProtectedPoolMinerPrivateKey;
+        _runningSettingsSnapshot.DefaultShareDifficulty = settings.DefaultShareDifficulty;
+        _runningSettingsSnapshot.ShareTargetSecondsMin = settings.ShareTargetSecondsMin;
+        _runningSettingsSnapshot.ShareTargetSecondsMax = settings.ShareTargetSecondsMax;
+        _runningSettingsSnapshot.ShareJobLifetimeSeconds = settings.ShareJobLifetimeSeconds;
+        _runningSettingsSnapshot.ChallengeLifetimeSeconds = settings.ChallengeLifetimeSeconds;
+        _runningSettingsSnapshot.SessionLifetimeHours = settings.SessionLifetimeHours;
+        _runningSettingsSnapshot.PoolFeeBasisPoints = settings.PoolFeeBasisPoints;
+        _runningSettingsSnapshot.AccountRegistrationEnabled = settings.AccountRegistrationEnabled;
+        _runningSettingsSnapshot.AddressPollSeconds = settings.AddressPollSeconds;
+        _runningSettingsSnapshot.DepositMinConfirmations = settings.DepositMinConfirmations;
+    }
+
     public async Task StartAsync(PoolSettings settings, CancellationToken cancellationToken = default)
     {
         if (_app is not null)

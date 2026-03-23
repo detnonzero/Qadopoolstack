@@ -9,10 +9,13 @@ public static class DifficultyFixedPoint
     // while staying well within 64-bit storage for the pool's current difficulty range.
     public const long Scale = 1_000_000L;
     private static readonly decimal ScaleDecimal = Scale;
+    private static readonly decimal MaxNormalizedDifficultyDecimal = long.MaxValue / ScaleDecimal;
+
+    public static double MaxNormalizedDifficulty => (double)MaxNormalizedDifficultyDecimal;
 
     public static long ToScaled(double difficulty)
     {
-        var normalized = NormalizeDecimal(difficulty);
+        var normalized = ClampNormalizedDecimal(difficulty);
         var scaled = decimal.Round(normalized * ScaleDecimal, 0, MidpointRounding.AwayFromZero);
         if (scaled < ScaleDecimal)
         {
@@ -21,7 +24,7 @@ public static class DifficultyFixedPoint
 
         if (scaled > long.MaxValue)
         {
-            throw new InvalidOperationException("Share difficulty exceeds the fixed-point storage range.");
+            scaled = long.MaxValue;
         }
 
         return (long)scaled;
@@ -30,7 +33,10 @@ public static class DifficultyFixedPoint
     public static double ToNormalizedDouble(double difficulty)
         => ToScaled(difficulty) / (double)Scale;
 
-    private static decimal NormalizeDecimal(double difficulty)
+    public static double ClampNormalizedDouble(double difficulty)
+        => (double)ClampNormalizedDecimal(difficulty);
+
+    private static decimal ClampNormalizedDecimal(double difficulty)
     {
         if (double.IsNaN(difficulty) || double.IsInfinity(difficulty) || difficulty <= 0d)
         {
@@ -38,12 +44,27 @@ public static class DifficultyFixedPoint
         }
 
         var text = difficulty.ToString("G17", CultureInfo.InvariantCulture);
-        if (!decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0m)
+        if (!decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return MaxNormalizedDifficultyDecimal;
+        }
+
+        if (parsed <= 0m)
         {
             return 1m;
         }
 
-        return parsed < 1m ? 1m : parsed;
+        if (parsed < 1m)
+        {
+            return 1m;
+        }
+
+        if (parsed > MaxNormalizedDifficultyDecimal)
+        {
+            return MaxNormalizedDifficultyDecimal;
+        }
+
+        return parsed;
     }
 }
 

@@ -9,17 +9,97 @@ const flashKeys = {
 const storageKeys = {
   sessionToken: "qado_session_token",
   minerToken: "qado_miner_token",
+  minerTokens: "qado_miner_tokens",
   sessionUsername: "qado_session_username",
 };
 
+function normalizeUsername(value) {
+  return `${value ?? ""}`.trim().toLowerCase();
+}
+
+function loadStoredMinerTokens(sessionUsername) {
+  const raw = localStorage.getItem(storageKeys.minerTokens);
+  const tokens = {};
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        for (const [username, token] of Object.entries(parsed)) {
+          const normalizedUsername = normalizeUsername(username);
+          const normalizedToken = `${token ?? ""}`.trim();
+          if (normalizedUsername && normalizedToken) {
+            tokens[normalizedUsername] = normalizedToken;
+          }
+        }
+      }
+    } catch {
+    }
+  }
+
+  const legacyToken = `${localStorage.getItem(storageKeys.minerToken) || ""}`.trim();
+  if (sessionUsername && legacyToken && !tokens[sessionUsername]) {
+    tokens[sessionUsername] = legacyToken;
+    localStorage.setItem(storageKeys.minerTokens, JSON.stringify(tokens));
+  }
+
+  if (legacyToken) {
+    localStorage.removeItem(storageKeys.minerToken);
+  }
+
+  return tokens;
+}
+
+const initialSessionUsername = normalizeUsername(localStorage.getItem(storageKeys.sessionUsername) || "");
+const initialMinerTokens = loadStoredMinerTokens(initialSessionUsername);
+
 const state = {
   sessionToken: localStorage.getItem(storageKeys.sessionToken) || "",
-  minerToken: localStorage.getItem(storageKeys.minerToken) || "",
-  sessionUsername: localStorage.getItem(storageKeys.sessionUsername) || "",
+  minerTokens: initialMinerTokens,
+  minerToken: initialSessionUsername ? initialMinerTokens[initialSessionUsername] || "" : "",
+  sessionUsername: initialSessionUsername,
   publicConfig: {
     accountRegistrationEnabled: true,
   },
 };
+
+function persistStoredMinerTokens() {
+  if (Object.keys(state.minerTokens).length === 0) {
+    localStorage.removeItem(storageKeys.minerTokens);
+    return;
+  }
+
+  localStorage.setItem(storageKeys.minerTokens, JSON.stringify(state.minerTokens));
+}
+
+function getStoredMinerToken(username) {
+  const normalizedUsername = normalizeUsername(username);
+  return normalizedUsername ? state.minerTokens[normalizedUsername] || "" : "";
+}
+
+function storeMinerTokenForUser(username, token) {
+  const normalizedUsername = normalizeUsername(username);
+  const normalizedToken = `${token ?? ""}`.trim();
+  if (!normalizedUsername || !normalizedToken) {
+    return;
+  }
+
+  state.minerTokens[normalizedUsername] = normalizedToken;
+  state.minerToken = normalizedToken;
+  persistStoredMinerTokens();
+}
+
+function clearStoredMinerToken(username) {
+  const normalizedUsername = normalizeUsername(username);
+  if (normalizedUsername && state.minerTokens[normalizedUsername]) {
+    delete state.minerTokens[normalizedUsername];
+    persistStoredMinerTokens();
+  }
+
+  if (!normalizedUsername || state.sessionUsername === normalizedUsername) {
+    state.minerToken = "";
+  }
+}
 
 const el = (id) => document.getElementById(id);
 
@@ -142,21 +222,17 @@ function clearSessionState() {
 }
 
 function clearMinerState() {
-  state.minerToken = "";
-  localStorage.removeItem(storageKeys.minerToken);
+  clearStoredMinerToken(state.sessionUsername);
 }
 
 function syncSessionIdentity(username) {
-  const normalizedUsername = `${username ?? ""}`.trim().toLowerCase();
+  const normalizedUsername = normalizeUsername(username);
   if (!normalizedUsername) {
     return;
   }
 
-  if (state.sessionUsername && state.sessionUsername !== normalizedUsername) {
-    clearMinerState();
-  }
-
   state.sessionUsername = normalizedUsername;
+  state.minerToken = getStoredMinerToken(normalizedUsername);
   localStorage.setItem(storageKeys.sessionUsername, normalizedUsername);
 }
 
@@ -173,8 +249,8 @@ function resetDashboard() {
   setText("balWithdrawn", "0.0");
   setText("depositAddress", "-");
   setText("withdrawAddress", "-");
+  setText("accountMinerToken", state.minerToken || "-");
   setText("challengeText", "-");
-  setText("minerTokenText", state.minerToken || "-");
   setText("minerPublicKey", "-");
   setText("minerDifficulty", "-");
   setText("minerAccepted", "-");
@@ -225,7 +301,6 @@ async function api(path, options = {}, mode = "user") {
 
   if (response.status === 401 && mode === "user") {
     clearSessionState();
-    clearMinerState();
 
     if (page === "dashboard") {
       setFlash("Session expired. Please sign in again.", true);
@@ -251,13 +326,19 @@ async function loadMe() {
   const me = await api("/user/me");
   syncSessionIdentity(me.username);
 
+  if (me.minerApiToken) {
+    storeMinerTokenForUser(me.username, me.minerApiToken);
+  } else {
+    state.minerToken = getStoredMinerToken(me.username);
+  }
+
   setSessionStatus(`Signed in as ${me.username}`);
   setText("meUsername", me.username);
   setText("depositAddress", me.depositAddress || "-");
   setText("withdrawAddress", me.withdrawalAddress || me.minerPublicKey || "-");
+  setText("accountMinerToken", me.minerApiToken || state.minerToken || "-");
   setText("minerPublicKey", me.minerPublicKey || "-");
   setText("minerDifficulty", me.minerDifficulty ?? "-");
-  setText("minerTokenText", state.minerToken || "-");
   setWithdrawEnabled(Boolean(me.minerPublicKey));
   updateBalance(me.balance);
 
@@ -419,7 +500,6 @@ async function onRegister(event) {
   });
 
   clearSessionState();
-  clearMinerState();
   storePrefillUsername(username);
   setFlash("Account created. Please sign in.");
   event.target.reset();
@@ -517,9 +597,8 @@ async function onVerify(event) {
     }),
   });
 
-  state.minerToken = data.apiToken;
-  localStorage.setItem(storageKeys.minerToken, state.minerToken);
-  setText("minerTokenText", data.apiToken);
+  storeMinerTokenForUser(state.sessionUsername, data.apiToken);
+  setText("accountMinerToken", data.apiToken);
   setText("minerPublicKey", data.publicKey);
   setText("minerDifficulty", data.shareDifficulty);
   setText("withdrawAddress", data.publicKey);
@@ -530,7 +609,6 @@ async function onVerify(event) {
 
 function onSignOut() {
   clearSessionState();
-  clearMinerState();
   setFlash("Signed out.");
   navigate("/");
 }
@@ -598,7 +676,6 @@ async function bootstrapDashboardPage() {
 
   if (!state.sessionToken) {
     clearSessionState();
-    clearMinerState();
     setFlash("Please sign in.");
     navigate("/");
     return;
@@ -612,7 +689,7 @@ async function bootstrapDashboardPage() {
   bindClick("signOutButton", onSignOut);
 
   if (state.minerToken) {
-    setText("minerTokenText", state.minerToken);
+    setText("accountMinerToken", state.minerToken);
   }
 
   await Promise.all([loadMe(), loadLedgerHistory()]);

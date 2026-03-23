@@ -69,7 +69,8 @@ public static class PoolApi
                 user.WithdrawalAddressHex ?? miner?.PublicKeyHex,
                 ToBalanceDto(balance),
                 miner?.PublicKeyHex,
-                miner is null ? null : DifficultyCalibration.ToCalibratedDifficulty(miner.ShareDifficulty, settings)));
+                miner is null ? null : DifficultyCalibration.ToCalibratedDifficulty(miner.ShareDifficulty, settings),
+                miner?.ApiTokenText));
         }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
 
         app.MapPost("/auth/challenge", async (ChallengeRequest request, SessionService sessions, MinerAuthService minerAuth, PoolSettings settings, HttpContext http, CancellationToken ct) =>
