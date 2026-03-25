@@ -16,6 +16,9 @@ public partial class MainWindow : Window
     private static readonly SolidColorBrush EnableAccountRegistrationBackgroundBrush = CreateBrush(0x22, 0x7A, 0x4F);
     private static readonly SolidColorBrush DisableAccountRegistrationBackgroundBrush = CreateBrush(0xA9, 0x5A, 0x12);
     private static readonly SolidColorBrush ActionButtonForegroundBrush = CreateBrush(0xFF, 0xFF, 0xFF);
+    private static readonly SolidColorBrush PositiveDeltaBrush = CreateBrush(0x22, 0x7A, 0x4F);
+    private static readonly SolidColorBrush NegativeDeltaBrush = CreateBrush(0xB0, 0x3A, 0x2E);
+    private static readonly SolidColorBrush NeutralDeltaBrush = CreateBrush(0x33, 0x33, 0x33);
     private readonly DesktopRuntime _runtime;
     private readonly ObservableCollection<string> _logLines = [];
     private bool _loaded;
@@ -271,6 +274,9 @@ public partial class MainWindow : Window
             : $"Stopped{Environment.NewLine}{currentAccessSummary}";
         SummaryRoundTextBlock.Text = dashboard.CurrentRoundHeight;
         SummaryTrackedBalanceTextBlock.Text = AmountUtility.FormatAtomic(ParseLong(dashboard.TotalTrackedBalanceAtomic));
+        SummaryPoolOnChainBalanceTextBlock.Text = FormatAtomicOrDash(dashboard.PoolOnChainBalanceAtomic);
+        SummaryPoolBalanceDeltaTextBlock.Text = FormatAtomicOrDash(dashboard.PoolBalanceDeltaAtomic);
+        SummaryPoolBalanceDeltaTextBlock.Foreground = GetDeltaBrush(dashboard.PoolBalanceDeltaAtomic);
         SummaryWithdrawalCountTextBlock.Text = dashboard.PendingWithdrawalCount.ToString(CultureInfo.InvariantCulture);
         SummaryUsersTextBlock.Text = dashboard.UserCount.ToString(CultureInfo.InvariantCulture);
         SummaryMinersTextBlock.Text = dashboard.VerifiedMinerCount.ToString(CultureInfo.InvariantCulture);
@@ -386,6 +392,36 @@ public partial class MainWindow : Window
         }
 
         return value;
+    }
+
+    private static string FormatAtomicOrDash(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "-";
+        }
+
+        return AmountUtility.FormatAtomic(ParseLong(text));
+    }
+
+    private static Brush GetDeltaBrush(string? text)
+    {
+        if (!long.TryParse((text ?? string.Empty).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+        {
+            return NeutralDeltaBrush;
+        }
+
+        if (value < 0)
+        {
+            return NegativeDeltaBrush;
+        }
+
+        if (value > 0)
+        {
+            return PositiveDeltaBrush;
+        }
+
+        return NeutralDeltaBrush;
     }
 
     private static string RenderLog(PoolLogEntry entry)

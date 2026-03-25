@@ -4,8 +4,11 @@ using QadoPoolStack.Desktop.Infrastructure.Logging;
 using QadoPoolStack.Desktop.Infrastructure.Security;
 using QadoPoolStack.Desktop.Persistence;
 using QadoPoolStack.Desktop.Services.Accounts;
+using QadoPoolStack.Desktop.Services.Node;
 using QadoPoolStack.Desktop.Services.Tls;
 using QadoPoolStack.Desktop.Utilities;
+using System.Globalization;
+using System.Net.Http;
 
 namespace QadoPoolStack.Desktop.Hosting;
 
@@ -134,6 +137,10 @@ public sealed class DesktopRuntime
         var withdrawals = await _repository.CountPendingWithdrawalsAsync(cancellationToken).ConfigureAwait(false);
         var shares = await _repository.CountOpenRoundSharesAsync(cancellationToken).ConfigureAwait(false);
         var tracked = await _repository.GetTotalTrackedBalanceAsync(cancellationToken).ConfigureAwait(false);
+        var poolOnChainBalance = await TryGetPoolOnChainBalanceAsync(cancellationToken).ConfigureAwait(false);
+        long? poolBalanceDelta = poolOnChainBalance.HasValue
+            ? checked(poolOnChainBalance.Value - tracked)
+            : null;
 
         return new DashboardSnapshot(
             ServerRunning,
@@ -143,7 +150,52 @@ public sealed class DesktopRuntime
             miners,
             withdrawals,
             shares,
-            tracked.ToString());
+            tracked.ToString(CultureInfo.InvariantCulture),
+            poolOnChainBalance?.ToString(CultureInfo.InvariantCulture),
+            poolBalanceDelta?.ToString(CultureInfo.InvariantCulture));
+    }
+
+    private async Task<long?> TryGetPoolOnChainBalanceAsync(CancellationToken cancellationToken)
+    {
+        if (!HexUtility.IsHex(Settings.PoolMinerPublicKey, 32) || string.IsNullOrWhiteSpace(Settings.NodeBaseUrl))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var httpClient = new HttpClient
+            {
+                BaseAddress = new Uri(Settings.NodeBaseUrl.TrimEnd('/')),
+                Timeout = TimeSpan.FromSeconds(20)
+            };
+
+            var nodeClient = new QadoNodeClient(httpClient, _logger);
+            var addressState = await nodeClient.GetAddressAsync(Settings.PoolMinerPublicKey, cancellationToken).ConfigureAwait(false);
+            if (addressState is null)
+            {
+                return null;
+            }
+
+            if (!ulong.TryParse(addressState.BalanceAtomic, NumberStyles.None, CultureInfo.InvariantCulture, out var balanceAtomic))
+            {
+                _logger.Warn("Dashboard", "Node returned an invalid pool on-chain balance.");
+                return null;
+            }
+
+            if (balanceAtomic > long.MaxValue)
+            {
+                _logger.Warn("Dashboard", "Pool on-chain balance exceeds supported range.");
+                return null;
+            }
+
+            return (long)balanceAtomic;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn("Dashboard", $"Unable to load pool on-chain balance: {ex.Message}");
+            return null;
+        }
     }
 
     public bool HasPendingServerSettingsChanges()

@@ -1194,6 +1194,40 @@ public sealed partial class PoolRepository
         return items;
     }
 
+    public async Task<List<ShareRecord>> GetAcceptedSharesSinceAsync(DateTimeOffset sinceUtc, CancellationToken cancellationToken = default)
+    {
+        var items = new List<ShareRecord>();
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(connection, null, """
+            SELECT
+                share_id,
+                round_id,
+                pool_job_id,
+                miner_id,
+                nonce_text,
+                timestamp_text,
+                hash_hex,
+                difficulty,
+                status,
+                meets_block_target,
+                submitted_utc
+            FROM shares
+            WHERE submitted_utc >= $submitted_utc
+              AND status IN ($accepted_status, $block_candidate_status)
+            ORDER BY submitted_utc DESC;
+            """,
+            ("$submitted_utc", ToDb(sinceUtc)),
+            ("$accepted_status", (int)ShareStatus.Accepted),
+            ("$block_candidate_status", (int)ShareStatus.BlockCandidate));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            items.Add(MapShare(reader));
+        }
+
+        return items;
+    }
+
     public async Task<List<(string minerId, long? difficultyScaled, double difficulty, long shareCount)>> GetRoundContributionWeightBucketsAsync(long roundId, CancellationToken cancellationToken = default)
     {
         var items = new List<(string minerId, long? difficultyScaled, double difficulty, long shareCount)>();

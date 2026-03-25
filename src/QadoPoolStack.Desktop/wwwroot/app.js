@@ -110,6 +110,84 @@ function setText(id, value) {
   }
 }
 
+function parseFiniteNumber(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const parsed = Number.parseFloat(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function formatMinerDifficulty(value) {
+  const parsed = parseFiniteNumber(value);
+  if (parsed === null) {
+    return "-";
+  }
+
+  return Math.trunc(parsed).toString();
+}
+
+function formatMinerHashrate(value) {
+  const parsed = parseFiniteNumber(value);
+  if (parsed === null) {
+    return "-";
+  }
+
+  return `${Math.trunc(parsed / 1_000_000)} MH/s`;
+}
+
+function formatGigaHashrate(value) {
+  const parsed = parseFiniteNumber(value);
+  if (parsed === null) {
+    return "-";
+  }
+
+  return `${Math.trunc(parsed / 1_000_000_000)} GH/s`;
+}
+
+function formatTimeAgo(value) {
+  if (!value) {
+    return "-";
+  }
+
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) {
+    return "-";
+  }
+
+  const elapsedSeconds = Math.max(0, Math.trunc((Date.now() - timestamp) / 1000));
+  if (elapsedSeconds < 5) {
+    return "just now";
+  }
+
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s ago`;
+  }
+
+  const elapsedMinutes = Math.trunc(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes}m ago`;
+  }
+
+  const elapsedHours = Math.trunc(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return `${elapsedHours}h ago`;
+  }
+
+  const elapsedDays = Math.trunc(elapsedHours / 24);
+  return `${elapsedDays}d ago`;
+}
+
 function bindSubmit(id, handler) {
   const form = el(id);
   if (!form) {
@@ -253,10 +331,13 @@ function resetDashboard() {
   setText("challengeText", "-");
   setText("minerPublicKey", "-");
   setText("minerDifficulty", "-");
+  setText("minerLastShareAgo", "-");
   setText("minerAccepted", "-");
   setText("minerStale", "-");
   setText("minerInvalid", "-");
   setText("minerHashrate", "-");
+  setText("poolHashrate", "-");
+  setText("networkHashrate", "-");
   renderLedgerHistory([]);
   setWithdrawEnabled(false);
 }
@@ -338,7 +419,7 @@ async function loadMe() {
   setText("withdrawAddress", me.withdrawalAddress || me.minerPublicKey || "-");
   setText("accountMinerToken", me.minerApiToken || state.minerToken || "-");
   setText("minerPublicKey", me.minerPublicKey || "-");
-  setText("minerDifficulty", me.minerDifficulty ?? "-");
+  setText("minerDifficulty", formatMinerDifficulty(me.minerDifficulty));
   setWithdrawEnabled(Boolean(me.minerPublicKey));
   updateBalance(me.balance);
 
@@ -353,11 +434,14 @@ async function loadMinerStats() {
 
   const stats = await api("/miner/stats", { method: "GET" }, "miner");
   setText("minerPublicKey", stats.publicKey);
-  setText("minerDifficulty", stats.shareDifficulty);
+  setText("minerDifficulty", formatMinerDifficulty(stats.shareDifficulty));
+  setText("minerLastShareAgo", formatTimeAgo(stats.lastShareUtc));
   setText("minerAccepted", stats.acceptedSharesRound);
   setText("minerStale", stats.staleSharesRound);
   setText("minerInvalid", stats.invalidSharesRound);
-  setText("minerHashrate", stats.estimatedHashrate);
+  setText("minerHashrate", formatMinerHashrate(stats.estimatedHashrate));
+  setText("poolHashrate", formatGigaHashrate(stats.poolHashrate));
+  setText("networkHashrate", formatGigaHashrate(stats.networkHashrate));
   setNotice("Miner stats loaded.");
 }
 
@@ -600,7 +684,7 @@ async function onVerify(event) {
   storeMinerTokenForUser(state.sessionUsername, data.apiToken);
   setText("accountMinerToken", data.apiToken);
   setText("minerPublicKey", data.publicKey);
-  setText("minerDifficulty", data.shareDifficulty);
+  setText("minerDifficulty", formatMinerDifficulty(data.shareDifficulty));
   setText("withdrawAddress", data.publicKey);
   setWithdrawEnabled(true);
   setNotice("Miner linked successfully. The same verified key is now used for deposits and withdrawals.");

@@ -207,7 +207,9 @@ public sealed record DashboardSnapshot(
     int VerifiedMinerCount,
     int PendingWithdrawalCount,
     int OpenRoundShareCount,
-    string TotalTrackedBalanceAtomic);
+    string TotalTrackedBalanceAtomic,
+    string? PoolOnChainBalanceAtomic,
+    string? PoolBalanceDeltaAtomic);
 
 public sealed record MinerStatsSnapshot(
     string MinerId,
@@ -219,6 +221,8 @@ public sealed record MinerStatsSnapshot(
     int InvalidSharesRound,
     string RoundId,
     string EstimatedHashrateText,
+    string PoolHashrateText,
+    string? NetworkHashrateText,
     DateTimeOffset? LastShareUtc);
 
 public sealed record UserBalanceView(

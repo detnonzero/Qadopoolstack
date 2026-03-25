@@ -272,6 +272,8 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
 
                                 <StackPanel Grid.Column="0"
@@ -300,6 +302,22 @@
                                 </StackPanel>
 
                                 <StackPanel Grid.Column="3"
+                                            Margin="8,0">
+                                    <TextBlock FontWeight="Bold"
+                                               Text="Pool On-Chain Balance" />
+                                    <TextBlock x:Name="SummaryPoolOnChainBalanceTextBlock"
+                                               FontSize="18" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="4"
+                                            Margin="8,0">
+                                    <TextBlock FontWeight="Bold"
+                                               Text="Pool Balance Delta" />
+                                    <TextBlock x:Name="SummaryPoolBalanceDeltaTextBlock"
+                                               FontSize="18" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="5"
                                             Margin="8,0,0,0">
                                     <TextBlock FontWeight="Bold"
                                                Text="Pending Withdrawals" />

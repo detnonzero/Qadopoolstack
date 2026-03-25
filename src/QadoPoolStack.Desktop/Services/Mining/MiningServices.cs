@@ -357,16 +357,23 @@ public sealed class DifficultyService
     public async Task<MinerStatsSnapshot> GetMinerStatsAsync(MinerRecord miner, CancellationToken cancellationToken = default)
     {
         var openRound = await _repository.GetOpenRoundAsync(cancellationToken).ConfigureAwait(false);
+        var recentRounds = await _repository.ListRecentRoundsAsync(DifficultyAdjustmentMath.NetworkHashrateWindowBlocks + 1, cancellationToken).ConfigureAwait(false);
         var summary = openRound is null
             ? (accepted: 0, stale: 0, invalid: 0)
             : await _repository.GetMinerRoundShareSummaryAsync(miner.MinerId, openRound.RoundId, cancellationToken).ConfigureAwait(false);
 
-        var sampleSince = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var now = DateTimeOffset.UtcNow;
+        var sampleSince = now.AddMinutes(-10);
         var acceptedShares = await _repository.GetAcceptedSharesSinceAsync(miner.MinerId, sampleSince, cancellationToken).ConfigureAwait(false);
-        var windowSeconds = acceptedShares.Count == 0
-            ? 600d
-            : Math.Max(60d, (DateTimeOffset.UtcNow - acceptedShares.Min(x => x.SubmittedUtc)).TotalSeconds);
-        var estimatedHashrate = acceptedShares.Sum(x => x.Difficulty) / windowSeconds;
+        var poolAcceptedShares = await _repository.GetAcceptedSharesSinceAsync(sampleSince, cancellationToken).ConfigureAwait(false);
+        var estimatedHashrate = acceptedShares.Count == 0
+            ? 0d
+            : acceptedShares.Sum(x => x.Difficulty) / Math.Max(60d, (now - acceptedShares.Min(x => x.SubmittedUtc)).TotalSeconds);
+        var poolHashrate = poolAcceptedShares.Count == 0
+            ? 0d
+            : poolAcceptedShares.Sum(x => x.Difficulty) / Math.Max(60d, (now - poolAcceptedShares.Min(x => x.SubmittedUtc)).TotalSeconds);
+        var networkHashrateValue = DifficultyAdjustmentMath.ComputeApproximateNetworkHashrate(recentRounds);
+        double? networkHashrate = networkHashrateValue > 0d ? networkHashrateValue : null;
         var user = await _repository.GetUserByIdAsync(miner.UserId, cancellationToken).ConfigureAwait(false);
 
         return new MinerStatsSnapshot(
@@ -379,6 +386,8 @@ public sealed class DifficultyService
             summary.invalid,
             openRound?.RoundId.ToString(CultureInfo.InvariantCulture) ?? "0",
             estimatedHashrate.ToString("0.00", CultureInfo.InvariantCulture),
+            poolHashrate.ToString("0.00", CultureInfo.InvariantCulture),
+            networkHashrate?.ToString("0.00", CultureInfo.InvariantCulture),
             miner.LastShareUtc);
     }
 
@@ -477,6 +486,8 @@ public sealed class DifficultyService
 
 internal static class DifficultyAdjustmentMath
 {
+    public const int NetworkHashrateWindowBlocks = 60;
+
     public static double ComputeAverageShareSeconds(IReadOnlyCollection<ShareRecord> acceptedShares, DateTimeOffset sampleSince, DateTimeOffset now)
     {
         var observationWindowSeconds = Math.Max(10d, (now - sampleSince).TotalSeconds);
@@ -489,6 +500,67 @@ internal static class DifficultyAdjustmentMath
         var last = acceptedShares.Max(x => x.SubmittedUtc);
         var spanSeconds = Math.Max(10d, (last - first).TotalSeconds);
         return spanSeconds / (acceptedShares.Count - 1);
+    }
+
+    public static double ComputeApproximateNetworkHashrate(IReadOnlyList<PoolRound> recentRounds, int windowBlocks = NetworkHashrateWindowBlocks)
+    {
+        if (recentRounds.Count <= windowBlocks || windowBlocks <= 0)
+        {
+            return 0d;
+        }
+
+        var rounds = recentRounds
+            .OrderByDescending(x => x.OpenedUtc)
+            .Take(windowBlocks + 1)
+            .ToArray();
+
+        if (rounds.Length <= windowBlocks)
+        {
+            return 0d;
+        }
+
+        var expectedHashesSum = 0d;
+        var solveTimeSumSeconds = 0d;
+        for (var i = 0; i < windowBlocks; i++)
+        {
+            var expectedHashes = ComputeExpectedHashesForTarget(rounds[i].NetworkTargetHex);
+            if (expectedHashes <= 0d || double.IsNaN(expectedHashes) || double.IsInfinity(expectedHashes))
+            {
+                return 0d;
+            }
+
+            expectedHashesSum += expectedHashes;
+            solveTimeSumSeconds += Math.Max(1d, (rounds[i].OpenedUtc - rounds[i + 1].OpenedUtc).TotalSeconds);
+        }
+
+        if (solveTimeSumSeconds <= 0d || expectedHashesSum <= 0d)
+        {
+            return 0d;
+        }
+
+        return expectedHashesSum / solveTimeSumSeconds;
+    }
+
+    private static double ComputeExpectedHashesForTarget(string networkTargetHex)
+    {
+        if (string.IsNullOrWhiteSpace(networkTargetHex))
+        {
+            return 0d;
+        }
+
+        var target = UInt256Utility.ParseHex(networkTargetHex);
+        if (target <= 0)
+        {
+            return 0d;
+        }
+
+        var expectedHashes = (double)(((BigInteger.One << 256) - BigInteger.One) / target);
+        if (expectedHashes <= 0d || double.IsNaN(expectedHashes) || double.IsInfinity(expectedHashes))
+        {
+            return 0d;
+        }
+
+        return expectedHashes;
     }
 }
 

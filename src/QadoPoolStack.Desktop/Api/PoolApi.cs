@@ -182,6 +182,8 @@ public static class PoolApi
                 stats.InvalidSharesRound,
                 stats.RoundId,
                 stats.EstimatedHashrateText,
+                stats.PoolHashrateText,
+                stats.NetworkHashrateText,
                 stats.LastShareUtc));
         }).RequireRateLimiting(PoolRateLimiting.MinerApiPolicy);
 

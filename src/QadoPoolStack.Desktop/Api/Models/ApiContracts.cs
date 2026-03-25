@@ -91,4 +91,6 @@ public sealed record MinerStatsResponse(
     int InvalidSharesRound,
     string RoundId,
     string EstimatedHashrate,
+    string PoolHashrate,
+    string? NetworkHashrate,
     DateTimeOffset? LastShareUtc);
