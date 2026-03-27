@@ -45,6 +45,17 @@ public sealed partial class QadoNodeClient
         return await ReadJsonAsync<QadoTipResponse>(response, "get chain tip", cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<QadoBlockResponse?> GetBlockAsync(string blockRef, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync($"/v1/block/{Uri.EscapeDataString(blockRef)}", cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        return await ReadJsonAsync<QadoBlockResponse>(response, "get block", cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<T> ReadJsonAsync<T>(HttpResponseMessage response, string action, CancellationToken cancellationToken)
     {
         if (!response.IsSuccessStatusCode)
@@ -157,4 +168,25 @@ public sealed record QadoTipResponse
 
     [JsonPropertyName("chainwork")]
     public string Chainwork { get; init; } = "0";
+}
+
+public sealed record QadoBlockResponse
+{
+    [JsonPropertyName("hash")]
+    public string Hash { get; init; } = "";
+
+    [JsonPropertyName("height")]
+    public string Height { get; init; } = "0";
+
+    [JsonPropertyName("prev_hash")]
+    public string PrevHash { get; init; } = "";
+
+    [JsonPropertyName("timestamp_utc")]
+    public DateTimeOffset TimestampUtc { get; init; }
+
+    [JsonPropertyName("miner")]
+    public string? Miner { get; init; }
+
+    [JsonPropertyName("tx_count")]
+    public int TxCount { get; init; }
 }

@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Numerics;
-using System.Text.Json;
 using Blake3;
+using Microsoft.Data.Sqlite;
 using QadoPoolStack.Desktop.Configuration;
 using QadoPoolStack.Desktop.Domain;
 using QadoPoolStack.Desktop.Infrastructure.Logging;
@@ -255,70 +255,101 @@ public sealed class RoundAccountingService
         await _repository.ExecuteInTransactionAsync(async (connection, transaction) =>
         {
             await _repository.UpdateRoundStateAsync(job.RoundId, RoundStatus.Won, blockHashHex, DateTimeOffset.UtcNow, connection, transaction, cancellationToken).ConfigureAwait(false);
-            await _repository.InsertFoundBlockAsync(
-                new FoundBlockRecord(Guid.NewGuid().ToString("N"), job.RoundId, blockHashHex, heightText, job.CoinbaseAmountText, DateTimeOffset.UtcNow),
-                connection,
-                transaction,
-                cancellationToken).ConfigureAwait(false);
+            var foundBlock = new FoundBlockRecord(
+                Guid.NewGuid().ToString("N"),
+                job.RoundId,
+                blockHashHex,
+                heightText,
+                job.CoinbaseAmountText,
+                FoundBlockStatus.Pending,
+                "0",
+                DateTimeOffset.UtcNow,
+                null,
+                null,
+                null);
+            await _repository.InsertFoundBlockAsync(foundBlock, connection, transaction, cancellationToken).ConfigureAwait(false);
 
-            var contributionBuckets = await _repository.GetRoundContributionWeightBucketsAsync(job.RoundId, connection, transaction, cancellationToken).ConfigureAwait(false);
-            if (contributionBuckets.Count == 0)
-            {
-                _logger.Warn("Mining", $"Block {blockHashHex} had no contributable shares in round {job.RoundId}.");
-                return;
-            }
+            var payouts = await BuildPendingPayoutPlanAsync(foundBlock, rewardAtomic, settings, connection, transaction, cancellationToken).ConfigureAwait(false);
+            await _repository.InsertFoundBlockPayoutsAsync(payouts, connection, transaction, cancellationToken).ConfigureAwait(false);
 
-            var contributionWeights = new Dictionary<string, BigInteger>(StringComparer.Ordinal);
-            foreach (var bucket in contributionBuckets)
-            {
-                var scaledDifficulty = bucket.difficultyScaled ?? DifficultyFixedPoint.ToScaled(bucket.difficulty);
-                if (scaledDifficulty <= 0 || bucket.shareCount <= 0)
-                {
-                    continue;
-                }
-
-                var bucketWeight = new BigInteger(scaledDifficulty) * bucket.shareCount;
-                if (contributionWeights.TryGetValue(bucket.minerId, out var existingWeight))
-                {
-                    contributionWeights[bucket.minerId] = existingWeight + bucketWeight;
-                }
-                else
-                {
-                    contributionWeights[bucket.minerId] = bucketWeight;
-                }
-            }
-
-            var totalWeight = contributionWeights.Values.Aggregate(BigInteger.Zero, (current, value) => current + value);
-            if (totalWeight <= 0)
-            {
-                _logger.Warn("Mining", $"Block {blockHashHex} had non-positive total share weight in round {job.RoundId}.");
-                return;
-            }
-
-            var feeAtomic = rewardAtomic * settings.PoolFeeBasisPoints / 10_000L;
-            var distributableAtomic = rewardAtomic - feeAtomic;
-            var payouts = LargestRemainderAllocation.Allocate(
-                distributableAtomic,
-                contributionWeights.Select(item => (item.Key, item.Value)));
-
-            foreach (var payout in payouts)
-            {
-                var miner = await _repository.GetMinerByIdAsync(payout.participantId, connection, transaction, cancellationToken).ConfigureAwait(false);
-                if (miner is null)
-                {
-                    continue;
-                }
-
-                await _repository.UpdateBalanceAsync(miner.UserId, payout.amountAtomic, 0, payout.amountAtomic, 0, 0, connection, transaction, cancellationToken).ConfigureAwait(false);
-                await _repository.InsertLedgerEntryAsync(
-                    new LedgerEntryRecord(Guid.NewGuid().ToString("N"), miner.UserId, LedgerEntryType.BlockReward, payout.amountAtomic, $"round:{job.RoundId}", JsonSerializer.Serialize(new { block = blockHashHex, height = heightText }), DateTimeOffset.UtcNow),
-                    connection,
-                    transaction,
-                    cancellationToken).ConfigureAwait(false);
-            }
-
-            _logger.Info("Mining", $"Accepted pool block {blockHashHex} for round {job.RoundId}. Reward={rewardAtomic} fee={feeAtomic} credited={distributableAtomic} payout_mode=largest_remainder.");
+            var distributableAtomic = payouts.Sum(item => item.AmountAtomic);
+            var feeAtomic = rewardAtomic - distributableAtomic;
+            _logger.Info("Mining", $"Accepted pool block {blockHashHex} for round {job.RoundId}. Finder={finderMiner.PublicKeyHex} reward={rewardAtomic} fee={feeAtomic} pending_credit={distributableAtomic} payout_mode=largest_remainder.");
         }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<List<FoundBlockPayoutRecord>> BuildPendingPayoutPlanAsync(FoundBlockRecord foundBlock, long rewardAtomic, PoolSettings settings, CancellationToken cancellationToken = default)
+    {
+        return await _repository.ExecuteInTransactionAsync(
+            (connection, transaction) => BuildPendingPayoutPlanAsync(foundBlock, rewardAtomic, settings, connection, transaction, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<List<FoundBlockPayoutRecord>> BuildPendingPayoutPlanAsync(FoundBlockRecord foundBlock, long rewardAtomic, PoolSettings settings, SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken = default)
+    {
+        var contributionBuckets = await _repository.GetRoundContributionWeightBucketsAsync(foundBlock.RoundId, connection, transaction, cancellationToken).ConfigureAwait(false);
+        if (contributionBuckets.Count == 0)
+        {
+            _logger.Warn("Mining", $"Block {foundBlock.BlockHashHex} had no contributable shares in round {foundBlock.RoundId}.");
+            return [];
+        }
+
+        var contributionWeights = new Dictionary<string, BigInteger>(StringComparer.Ordinal);
+        foreach (var bucket in contributionBuckets)
+        {
+            var scaledDifficulty = bucket.difficultyScaled ?? DifficultyFixedPoint.ToScaled(bucket.difficulty);
+            if (scaledDifficulty <= 0 || bucket.shareCount <= 0)
+            {
+                continue;
+            }
+
+            var bucketWeight = new BigInteger(scaledDifficulty) * bucket.shareCount;
+            if (contributionWeights.TryGetValue(bucket.minerId, out var existingWeight))
+            {
+                contributionWeights[bucket.minerId] = existingWeight + bucketWeight;
+            }
+            else
+            {
+                contributionWeights[bucket.minerId] = bucketWeight;
+            }
+        }
+
+        var totalWeight = contributionWeights.Values.Aggregate(BigInteger.Zero, (current, value) => current + value);
+        if (totalWeight <= 0)
+        {
+            _logger.Warn("Mining", $"Block {foundBlock.BlockHashHex} had non-positive total share weight in round {foundBlock.RoundId}.");
+            return [];
+        }
+
+        var feeAtomic = rewardAtomic * settings.PoolFeeBasisPoints / 10_000L;
+        var distributableAtomic = rewardAtomic - feeAtomic;
+        var payouts = LargestRemainderAllocation.Allocate(
+            distributableAtomic,
+            contributionWeights.Select(item => (item.Key, item.Value)));
+        var createdUtc = DateTimeOffset.UtcNow;
+        var payoutRecords = new List<FoundBlockPayoutRecord>();
+
+        foreach (var payout in payouts)
+        {
+            var miner = await _repository.GetMinerByIdAsync(payout.participantId, connection, transaction, cancellationToken).ConfigureAwait(false);
+            if (miner is null)
+            {
+                continue;
+            }
+
+            payoutRecords.Add(new FoundBlockPayoutRecord(
+                Guid.NewGuid().ToString("N"),
+                foundBlock.BlockId,
+                foundBlock.RoundId,
+                miner.UserId,
+                payout.amountAtomic,
+                FoundBlockPayoutStatus.Pending,
+                createdUtc,
+                null,
+                null));
+        }
+
+        return payoutRecords;
     }
 }
 
@@ -588,5 +619,138 @@ public sealed class RoundMonitorService
         {
             await _repository.CloseOpenRoundsNotMatchingPrevHashAsync(tip.Hash, RoundStatus.Closed, cancellationToken).ConfigureAwait(false);
         }
+    }
+}
+
+public sealed class FoundBlockSettlementService
+{
+    private readonly PoolRepository _repository;
+    private readonly QadoNodeClient _nodeClient;
+    private readonly RoundAccountingService _roundAccountingService;
+    private readonly PoolLogger _logger;
+    private readonly PoolSettings _settings;
+
+    public FoundBlockSettlementService(
+        PoolRepository repository,
+        QadoNodeClient nodeClient,
+        RoundAccountingService roundAccountingService,
+        PoolLogger logger,
+        PoolSettings settings)
+    {
+        _repository = repository;
+        _nodeClient = nodeClient;
+        _roundAccountingService = roundAccountingService;
+        _logger = logger;
+        _settings = settings;
+    }
+
+    public async Task ReconcileAsync(CancellationToken cancellationToken = default)
+    {
+        var tip = await _nodeClient.GetTipAsync(cancellationToken).ConfigureAwait(false);
+        if (!long.TryParse(tip.Height, NumberStyles.None, CultureInfo.InvariantCulture, out var tipHeight))
+        {
+            _logger.Warn("Rewards", $"Unable to reconcile found blocks because node tip height '{tip.Height}' is invalid.");
+            return;
+        }
+
+        var backfilledLegacyCount = await _repository.BackfillLegacyFoundBlocksAsync(5_000, cancellationToken).ConfigureAwait(false);
+        if (backfilledLegacyCount > 0)
+        {
+            _logger.Info("Rewards", $"Backfilled {backfilledLegacyCount} legacy found block record(s) for settlement reconciliation.");
+        }
+
+        var foundBlocks = await _repository.ListFoundBlocksForSettlementAsync(5_000, cancellationToken).ConfigureAwait(false);
+        foreach (var foundBlock in foundBlocks)
+        {
+            await EnsurePayoutPlanAsync(foundBlock, cancellationToken).ConfigureAwait(false);
+
+            if (!long.TryParse(foundBlock.HeightText, NumberStyles.None, CultureInfo.InvariantCulture, out var blockHeight))
+            {
+                _logger.Warn("Rewards", $"Skipping found block {foundBlock.BlockHashHex} because height '{foundBlock.HeightText}' is invalid.");
+                continue;
+            }
+
+            if (tipHeight < blockHeight)
+            {
+                await _repository.UpdateFoundBlockObservationAsync(foundBlock.BlockId, "0", DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            var canonicalBlock = await _nodeClient.GetBlockAsync(foundBlock.HeightText, cancellationToken).ConfigureAwait(false);
+            if (canonicalBlock is null)
+            {
+                _logger.Warn("Rewards", $"Node returned no canonical block for height {foundBlock.HeightText} while reconciling {foundBlock.BlockHashHex}.");
+                continue;
+            }
+
+            if (!string.Equals(canonicalBlock.Hash, foundBlock.BlockHashHex, StringComparison.Ordinal))
+            {
+                await _repository.MarkFoundBlockOrphanedAsync(foundBlock, "canonical-mismatch", cancellationToken).ConfigureAwait(false);
+                _logger.Warn("Rewards", $"Marked found block {foundBlock.BlockHashHex} at height {foundBlock.HeightText} as orphaned because canonical hash is {canonicalBlock.Hash}.");
+                continue;
+            }
+
+            var confirmations = Math.Max(0L, tipHeight - blockHeight + 1);
+            var confirmationsText = confirmations.ToString(CultureInfo.InvariantCulture);
+            var payouts = await _repository.ListFoundBlockPayoutsAsync(foundBlock.BlockId, cancellationToken).ConfigureAwait(false);
+
+            if (confirmations < Math.Max(1, _settings.MiningRewardMinConfirmations))
+            {
+                await _repository.UpdateFoundBlockObservationAsync(foundBlock.BlockId, confirmationsText, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            if (payouts.Any(item => item.Status == FoundBlockPayoutStatus.Pending))
+            {
+                await _repository.FinalizePendingFoundBlockPayoutsAsync(foundBlock, confirmationsText, cancellationToken).ConfigureAwait(false);
+                _logger.Info("Rewards", $"Finalized found block {foundBlock.BlockHashHex} with {confirmations} confirmations.");
+                continue;
+            }
+
+            await _repository.MarkFoundBlockCanonicalFinalizedAsync(foundBlock.BlockId, confirmationsText, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task EnsurePayoutPlanAsync(FoundBlockRecord foundBlock, CancellationToken cancellationToken)
+    {
+        var existingPayouts = await _repository.ListFoundBlockPayoutsAsync(foundBlock.BlockId, cancellationToken).ConfigureAwait(false);
+        if (existingPayouts.Count > 0)
+        {
+            return;
+        }
+
+        var legacyEntries = await _repository.ListLegacyBlockRewardEntriesByRoundIdAsync(foundBlock.RoundId, cancellationToken).ConfigureAwait(false);
+        if (legacyEntries.Count > 0)
+        {
+            var legacyPayouts = legacyEntries
+                .Where(entry => entry.DeltaAtomic > 0)
+                .Select(entry => new FoundBlockPayoutRecord(
+                    Guid.NewGuid().ToString("N"),
+                    foundBlock.BlockId,
+                    foundBlock.RoundId,
+                    entry.UserId,
+                    entry.DeltaAtomic,
+                    FoundBlockPayoutStatus.Finalized,
+                    entry.CreatedUtc,
+                    entry.CreatedUtc,
+                    null))
+                .ToArray();
+            await _repository.InsertFoundBlockPayoutsAsync(legacyPayouts, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!long.TryParse(foundBlock.RewardAtomicText, NumberStyles.None, CultureInfo.InvariantCulture, out var rewardAtomic))
+        {
+            _logger.Warn("Rewards", $"Unable to backfill payout plan for found block {foundBlock.BlockHashHex}: invalid reward '{foundBlock.RewardAtomicText}'.");
+            return;
+        }
+
+        var payouts = await _roundAccountingService.BuildPendingPayoutPlanAsync(foundBlock, rewardAtomic, _settings, cancellationToken).ConfigureAwait(false);
+        if (payouts.Count == 0)
+        {
+            return;
+        }
+
+        await _repository.InsertFoundBlockPayoutsAsync(payouts, cancellationToken).ConfigureAwait(false);
     }
 }

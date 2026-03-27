@@ -234,11 +234,18 @@ public sealed partial class PoolRepository
                 b.pending_withdrawal_atomic,
                 b.total_mined_atomic,
                 b.total_deposited_atomic,
-                b.total_withdrawn_atomic
+                b.total_withdrawn_atomic,
+                COALESCE((
+                    SELECT SUM(fbp.amount_atomic)
+                    FROM found_block_payouts fbp
+                    WHERE fbp.user_id = u.user_id
+                      AND fbp.status = $pending_status
+                ), 0)
             FROM users u
             INNER JOIN balances b ON b.user_id = u.user_id
             ORDER BY u.username;
-            """);
+            """,
+            ("$pending_status", (int)FoundBlockPayoutStatus.Pending));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -251,7 +258,8 @@ public sealed partial class PoolRepository
                 reader.GetInt64(5),
                 reader.GetInt64(6),
                 reader.GetInt64(7),
-                reader.GetInt64(8)));
+                reader.GetInt64(8),
+                reader.GetInt64(9)));
         }
 
         return items;
@@ -874,7 +882,12 @@ public sealed partial class PoolRepository
                 block_hash_hex,
                 height_text,
                 reward_atomic_text,
-                accepted_utc
+                accepted_utc,
+                status,
+                confirmations_text,
+                last_checked_utc,
+                finalized_utc,
+                orphaned_utc
             )
             VALUES (
                 $block_id,
@@ -882,7 +895,12 @@ public sealed partial class PoolRepository
                 $block_hash_hex,
                 $height_text,
                 $reward_atomic_text,
-                $accepted_utc
+                $accepted_utc,
+                $status,
+                $confirmations_text,
+                $last_checked_utc,
+                $finalized_utc,
+                $orphaned_utc
             );
             """,
             ("$block_id", block.BlockId),
@@ -890,7 +908,12 @@ public sealed partial class PoolRepository
             ("$block_hash_hex", block.BlockHashHex),
             ("$height_text", block.HeightText),
             ("$reward_atomic_text", block.RewardAtomicText),
-            ("$accepted_utc", ToDb(block.AcceptedUtc)));
+            ("$accepted_utc", ToDb(block.AcceptedUtc)),
+            ("$status", (int)block.Status),
+            ("$confirmations_text", block.ConfirmationsText),
+            ("$last_checked_utc", block.LastCheckedUtc is null ? null : ToDb(block.LastCheckedUtc.Value)),
+            ("$finalized_utc", block.FinalizedUtc is null ? null : ToDb(block.FinalizedUtc.Value)),
+            ("$orphaned_utc", block.OrphanedUtc is null ? null : ToDb(block.OrphanedUtc.Value)));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -1308,7 +1331,12 @@ public sealed partial class PoolRepository
                 block_hash_hex,
                 height_text,
                 reward_atomic_text,
-                accepted_utc
+                status,
+                confirmations_text,
+                accepted_utc,
+                last_checked_utc,
+                finalized_utc,
+                orphaned_utc
             FROM found_blocks
             ORDER BY accepted_utc DESC
             LIMIT $limit;
@@ -1619,6 +1647,36 @@ public sealed partial class PoolRepository
         return Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
     }
 
+    public async Task<long> GetTotalImmatureMiningObligationAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(
+            connection,
+            null,
+            "SELECT COALESCE(SUM(amount_atomic), 0) FROM found_block_payouts WHERE status = $status;",
+            ("$status", (int)FoundBlockPayoutStatus.Pending));
+        var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
+    }
+
+    public async Task<long> GetUserImmatureMiningAtomicAsync(string userId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(
+            connection,
+            null,
+            """
+            SELECT COALESCE(SUM(amount_atomic), 0)
+            FROM found_block_payouts
+            WHERE user_id = $user_id
+              AND status = $status;
+            """,
+            ("$user_id", userId),
+            ("$status", (int)FoundBlockPayoutStatus.Pending));
+        var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
+    }
+
     public async Task<int> CountUsersAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -1775,7 +1833,12 @@ public sealed partial class PoolRepository
             reader.GetString(2),
             reader.GetString(3),
             reader.GetString(4),
-            ParseDbTime(reader.GetString(5)));
+            (FoundBlockStatus)reader.GetInt32(5),
+            reader.GetString(6),
+            ParseDbTime(reader.GetString(7)),
+            reader.IsDBNull(8) ? null : ParseDbTime(reader.GetString(8)),
+            reader.IsDBNull(9) ? null : ParseDbTime(reader.GetString(9)),
+            reader.IsDBNull(10) ? null : ParseDbTime(reader.GetString(10)));
     }
 
     private static BalanceRecord MapBalance(SqliteDataReader reader)

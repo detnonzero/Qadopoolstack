@@ -41,11 +41,13 @@ public sealed class DifficultyAdjustmentWorker : BackgroundService
 public sealed class RoundFinalizationWorker : BackgroundService
 {
     private readonly RoundMonitorService _roundMonitorService;
+    private readonly FoundBlockSettlementService _foundBlockSettlementService;
     private readonly PoolLogger _logger;
 
-    public RoundFinalizationWorker(RoundMonitorService roundMonitorService, PoolLogger logger)
+    public RoundFinalizationWorker(RoundMonitorService roundMonitorService, FoundBlockSettlementService foundBlockSettlementService, PoolLogger logger)
     {
         _roundMonitorService = roundMonitorService;
+        _foundBlockSettlementService = foundBlockSettlementService;
         _logger = logger;
     }
 
@@ -57,6 +59,7 @@ public sealed class RoundFinalizationWorker : BackgroundService
             try
             {
                 await _roundMonitorService.RefreshOpenRoundAsync(stoppingToken).ConfigureAwait(false);
+                await _foundBlockSettlementService.ReconcileAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

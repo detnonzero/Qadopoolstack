@@ -155,7 +155,25 @@ public static class SqliteSchema
                 block_hash_hex TEXT NOT NULL UNIQUE,
                 height_text TEXT NOT NULL,
                 reward_atomic_text TEXT NOT NULL,
-                accepted_utc TEXT NOT NULL
+                accepted_utc TEXT NOT NULL,
+                status INTEGER NOT NULL DEFAULT 1,
+                confirmations_text TEXT NOT NULL DEFAULT '0',
+                last_checked_utc TEXT NULL,
+                finalized_utc TEXT NULL,
+                orphaned_utc TEXT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS found_block_payouts (
+                payout_id TEXT PRIMARY KEY,
+                block_id TEXT NOT NULL REFERENCES found_blocks(block_id) ON DELETE CASCADE,
+                round_id INTEGER NOT NULL REFERENCES rounds(round_id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                amount_atomic INTEGER NOT NULL,
+                status INTEGER NOT NULL,
+                created_utc TEXT NOT NULL,
+                finalized_utc TEXT NULL,
+                reversed_utc TEXT NULL,
+                UNIQUE(block_id, user_id)
             );
 
             CREATE TABLE IF NOT EXISTS balances (
@@ -202,6 +220,7 @@ public static class SqliteSchema
             CREATE INDEX IF NOT EXISTS ix_shares_round_miner_status ON shares(round_id, miner_id, status);
             CREATE INDEX IF NOT EXISTS ix_rounds_status_opened ON rounds(status, opened_utc);
             CREATE INDEX IF NOT EXISTS ix_ledger_user_created ON ledger_entries(user_id, created_utc);
+            CREATE INDEX IF NOT EXISTS ix_ledger_entries_type_reference_created ON ledger_entries(entry_type, reference, created_utc);
             CREATE INDEX IF NOT EXISTS ix_withdrawals_status_requested ON withdrawal_requests(status, requested_utc);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -210,7 +229,24 @@ public static class SqliteSchema
         await EnsureColumnAsync(connection, "incoming_deposit_events", "ignore_reason", "TEXT NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "shares", "difficulty_scaled", "INTEGER NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "miners", "api_token_text", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "found_blocks", "status", "INTEGER NOT NULL DEFAULT 1", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "found_blocks", "confirmations_text", "TEXT NOT NULL DEFAULT '0'", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "found_blocks", "last_checked_utc", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "found_blocks", "finalized_utc", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "found_blocks", "orphaned_utc", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsurePostMigrationIndexesAsync(connection, cancellationToken).ConfigureAwait(false);
         await BackfillShareDifficultyScaledAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task EnsurePostMigrationIndexesAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE INDEX IF NOT EXISTS ix_found_blocks_status_accepted ON found_blocks(status, accepted_utc);
+            CREATE INDEX IF NOT EXISTS ix_found_block_payouts_status_block ON found_block_payouts(status, block_id);
+            CREATE INDEX IF NOT EXISTS ix_found_block_payouts_user_status ON found_block_payouts(user_id, status);
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task EnsureColumnAsync(SqliteConnection connection, string tableName, string columnName, string columnDefinition, CancellationToken cancellationToken)

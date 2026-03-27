@@ -43,7 +43,8 @@ public sealed record BalanceDto(
     string PendingWithdrawal,
     string TotalMined,
     string TotalDeposited,
-    string TotalWithdrawn);
+    string TotalWithdrawn,
+    string ImmatureMiningRewards);
 
 public sealed record MeResponse(
     string Username,

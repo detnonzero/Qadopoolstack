@@ -58,6 +58,8 @@ public sealed class PoolSettings
 
     public int DepositMinConfirmations { get; set; } = 6;
 
+    public int MiningRewardMinConfirmations { get; set; } = 12;
+
     public PoolSettings Clone()
     {
         return new PoolSettings
@@ -87,7 +89,8 @@ public sealed class PoolSettings
             PoolFeeBasisPoints = PoolFeeBasisPoints,
             AccountRegistrationEnabled = AccountRegistrationEnabled,
             AddressPollSeconds = AddressPollSeconds,
-            DepositMinConfirmations = DepositMinConfirmations
+            DepositMinConfirmations = DepositMinConfirmations,
+            MiningRewardMinConfirmations = MiningRewardMinConfirmations
         };
     }
 
@@ -123,7 +126,8 @@ public sealed class PoolSettings
                PoolFeeBasisPoints == other.PoolFeeBasisPoints &&
                AccountRegistrationEnabled == other.AccountRegistrationEnabled &&
                AddressPollSeconds == other.AddressPollSeconds &&
-               DepositMinConfirmations == other.DepositMinConfirmations;
+               DepositMinConfirmations == other.DepositMinConfirmations &&
+               MiningRewardMinConfirmations == other.MiningRewardMinConfirmations;
     }
 
     public static PoolSettings CreateDefault() => new();

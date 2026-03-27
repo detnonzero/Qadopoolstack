@@ -17,6 +17,22 @@ public enum RoundStatus
     Orphaned = 4
 }
 
+public enum FoundBlockStatus
+{
+    Pending = 1,
+    Finalized = 2,
+    Orphaned = 3,
+    Reversed = 4
+}
+
+public enum FoundBlockPayoutStatus
+{
+    Pending = 1,
+    Finalized = 2,
+    Orphaned = 3,
+    Reversed = 4
+}
+
 public enum LedgerEntryType
 {
     DepositCredit = 1,
@@ -168,7 +184,23 @@ public sealed record FoundBlockRecord(
     string BlockHashHex,
     string HeightText,
     string RewardAtomicText,
-    DateTimeOffset AcceptedUtc);
+    FoundBlockStatus Status,
+    string ConfirmationsText,
+    DateTimeOffset AcceptedUtc,
+    DateTimeOffset? LastCheckedUtc,
+    DateTimeOffset? FinalizedUtc,
+    DateTimeOffset? OrphanedUtc);
+
+public sealed record FoundBlockPayoutRecord(
+    string PayoutId,
+    string BlockId,
+    long RoundId,
+    string UserId,
+    long AmountAtomic,
+    FoundBlockPayoutStatus Status,
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset? FinalizedUtc,
+    DateTimeOffset? ReversedUtc);
 
 public sealed record BalanceRecord(
     string UserId,
@@ -209,7 +241,9 @@ public sealed record DashboardSnapshot(
     int OpenRoundShareCount,
     string TotalTrackedBalanceAtomic,
     string? PoolOnChainBalanceAtomic,
-    string? PoolBalanceDeltaAtomic);
+    string? PoolBalanceDeltaAtomic,
+    string SpendableTrackedBalanceAtomic,
+    string ImmatureMiningBalanceAtomic);
 
 public sealed record MinerStatsSnapshot(
     string MinerId,
@@ -234,4 +268,5 @@ public sealed record UserBalanceView(
     long PendingWithdrawalAtomic,
     long TotalMinedAtomic,
     long TotalDepositedAtomic,
-    long TotalWithdrawnAtomic);
+    long TotalWithdrawnAtomic,
+    long ImmatureMiningAtomic);

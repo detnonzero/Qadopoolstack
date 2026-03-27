@@ -128,6 +128,7 @@ public sealed class PoolServerHost
         builder.Services.AddSingleton<ShareValidationService>();
         builder.Services.AddSingleton<DifficultyService>();
         builder.Services.AddSingleton<RoundMonitorService>();
+        builder.Services.AddSingleton<FoundBlockSettlementService>();
         builder.Services.AddSingleton<LetsEncryptService>();
         builder.Services.AddHttpClient<QadoNodeClient>(client =>
         {

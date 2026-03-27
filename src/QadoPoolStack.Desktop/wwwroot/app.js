@@ -323,6 +323,7 @@ function resetDashboard() {
   setText("balAvailable", "0.0");
   setText("balPending", "0.0");
   setText("balMined", "0.0");
+  setText("balImmatureMining", "0.0");
   setText("balDeposited", "0.0");
   setText("balWithdrawn", "0.0");
   setText("depositAddress", "-");
@@ -346,6 +347,7 @@ function updateBalance(balance) {
   setText("balAvailable", balance.available);
   setText("balPending", balance.pendingWithdrawal);
   setText("balMined", balance.totalMined);
+  setText("balImmatureMining", balance.immatureMiningRewards || "0.0");
   setText("balDeposited", balance.totalDeposited);
   setText("balWithdrawn", balance.totalWithdrawn);
 }

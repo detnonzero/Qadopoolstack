@@ -136,7 +136,9 @@ public sealed class DesktopRuntime
         var miners = await _repository.CountVerifiedMinersAsync(cancellationToken).ConfigureAwait(false);
         var withdrawals = await _repository.CountPendingWithdrawalsAsync(cancellationToken).ConfigureAwait(false);
         var shares = await _repository.CountOpenRoundSharesAsync(cancellationToken).ConfigureAwait(false);
-        var tracked = await _repository.GetTotalTrackedBalanceAsync(cancellationToken).ConfigureAwait(false);
+        var trackedSpendable = await _repository.GetTotalTrackedBalanceAsync(cancellationToken).ConfigureAwait(false);
+        var immatureMining = await _repository.GetTotalImmatureMiningObligationAsync(cancellationToken).ConfigureAwait(false);
+        var tracked = checked(trackedSpendable + immatureMining);
         var poolOnChainBalance = await TryGetPoolOnChainBalanceAsync(cancellationToken).ConfigureAwait(false);
         long? poolBalanceDelta = poolOnChainBalance.HasValue
             ? checked(poolOnChainBalance.Value - tracked)
@@ -152,7 +154,9 @@ public sealed class DesktopRuntime
             shares,
             tracked.ToString(CultureInfo.InvariantCulture),
             poolOnChainBalance?.ToString(CultureInfo.InvariantCulture),
-            poolBalanceDelta?.ToString(CultureInfo.InvariantCulture));
+            poolBalanceDelta?.ToString(CultureInfo.InvariantCulture),
+            trackedSpendable.ToString(CultureInfo.InvariantCulture),
+            immatureMining.ToString(CultureInfo.InvariantCulture));
     }
 
     private async Task<long?> TryGetPoolOnChainBalanceAsync(CancellationToken cancellationToken)

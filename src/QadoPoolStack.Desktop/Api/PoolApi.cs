@@ -62,12 +62,13 @@ public static class PoolApi
             }
 
             var balance = await accounts.GetBalanceAsync(user.UserId, ct).ConfigureAwait(false);
+            var immatureMining = await repository.GetUserImmatureMiningAtomicAsync(user.UserId, ct).ConfigureAwait(false);
             var miner = await repository.GetMinerByUserIdAsync(user.UserId, ct).ConfigureAwait(false);
             return Results.Ok(new MeResponse(
                 user.Username,
                 GetPoolDepositAddress(settings),
                 user.WithdrawalAddressHex ?? miner?.PublicKeyHex,
-                ToBalanceDto(balance),
+                ToBalanceDto(balance, immatureMining),
                 miner?.PublicKeyHex,
                 miner is null ? null : DifficultyCalibration.ToCalibratedDifficulty(miner.ShareDifficulty, settings),
                 miner?.ApiTokenText));
@@ -187,7 +188,7 @@ public static class PoolApi
                 stats.LastShareUtc));
         }).RequireRateLimiting(PoolRateLimiting.MinerApiPolicy);
 
-        app.MapMethods("/deposit", ["GET", "POST"], async (SessionService sessions, UserAccountService accounts, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        app.MapMethods("/deposit", ["GET", "POST"], async (SessionService sessions, UserAccountService accounts, PoolRepository repository, PoolSettings settings, HttpContext http, CancellationToken ct) =>
         {
             var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
             if (user is null)
@@ -196,7 +197,8 @@ public static class PoolApi
             }
 
             var balance = await accounts.GetBalanceAsync(user.UserId, ct).ConfigureAwait(false);
-            return Results.Ok(new DepositResponse(GetPoolDepositAddress(settings), ToBalanceDto(balance)));
+            var immatureMining = await repository.GetUserImmatureMiningAtomicAsync(user.UserId, ct).ConfigureAwait(false);
+            return Results.Ok(new DepositResponse(GetPoolDepositAddress(settings), ToBalanceDto(balance, immatureMining)));
         }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
 
         app.MapPost("/withdraw", async (WithdrawRequest request, SessionService sessions, LedgerService ledgerService, PoolSettings settings, HttpContext http, CancellationToken ct) =>
@@ -306,14 +308,15 @@ public static class PoolApi
         return null;
     }
 
-    private static BalanceDto ToBalanceDto(QadoPoolStack.Desktop.Domain.BalanceRecord? balance)
+    private static BalanceDto ToBalanceDto(QadoPoolStack.Desktop.Domain.BalanceRecord? balance, long immatureMiningAtomic)
     {
         return new BalanceDto(
             AmountUtility.FormatAtomic(balance?.AvailableAtomic ?? 0),
             AmountUtility.FormatAtomic(balance?.PendingWithdrawalAtomic ?? 0),
             AmountUtility.FormatAtomic(balance?.TotalMinedAtomic ?? 0),
             AmountUtility.FormatAtomic(balance?.TotalDepositedAtomic ?? 0),
-            AmountUtility.FormatAtomic(balance?.TotalWithdrawnAtomic ?? 0));
+            AmountUtility.FormatAtomic(balance?.TotalWithdrawnAtomic ?? 0),
+            AmountUtility.FormatAtomic(immatureMiningAtomic));
     }
 
     private static string GetPoolDepositAddress(PoolSettings settings)
@@ -334,6 +337,7 @@ public static class PoolApi
             LedgerEntryType.WithdrawalReserve => "Withdrawal",
             LedgerEntryType.WithdrawalRelease when entry.DeltaAtomic > 0 => "Withdrawal reversed",
             LedgerEntryType.WithdrawalRelease => "Withdrawal update",
+            LedgerEntryType.ManualAdjustment when entry.Reference.StartsWith("block-reward-reverse:", StringComparison.Ordinal) => "Mining reward reversed",
             LedgerEntryType.ManualAdjustment when entry.DeltaAtomic < 0 => "Debit adjustment",
             LedgerEntryType.ManualAdjustment => "Credit adjustment",
             _ => entry.EntryType.ToString()
@@ -348,6 +352,7 @@ public static class PoolApi
             LedgerEntryType.WithdrawalReserve => ("Recipient", ReadMetadataString(metadata, "address") ?? "-"),
             LedgerEntryType.WithdrawalRelease when entry.DeltaAtomic > 0 => ("Source", "Pool accounting"),
             LedgerEntryType.WithdrawalRelease => ("Recipient", ReadMetadataString(metadata, "address") ?? "-"),
+            LedgerEntryType.ManualAdjustment when entry.Reference.StartsWith("block-reward-reverse:", StringComparison.Ordinal) => ("Source", "Pool reorg reconciliation"),
             LedgerEntryType.ManualAdjustment => ("Reference", string.IsNullOrWhiteSpace(entry.Reference) ? "-" : entry.Reference),
             _ => ("Reference", string.IsNullOrWhiteSpace(entry.Reference) ? "-" : entry.Reference)
         };
@@ -359,6 +364,8 @@ public static class PoolApi
             LedgerEntryType.BlockReward => ReadMetadataString(metadata, "height") is { } rewardHeight ? $"Block {rewardHeight}" : null,
             LedgerEntryType.WithdrawalReserve => BuildWithdrawalNote(metadata),
             LedgerEntryType.WithdrawalRelease => ReadMetadataString(metadata, "note"),
+            LedgerEntryType.ManualAdjustment when entry.Reference.StartsWith("block-reward-reverse:", StringComparison.Ordinal)
+                => ReadMetadataString(metadata, "height") is { } orphanedHeight ? $"Orphaned block {orphanedHeight}" : ReadMetadataString(metadata, "reason"),
             LedgerEntryType.ManualAdjustment => ReadMetadataString(metadata, "note"),
             _ => null
         };
