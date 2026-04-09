@@ -3,57 +3,70 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Qado Pool Dashboard</title>
-  <link rel="stylesheet" href="/app.css?v=20260320c">
+  <title>Qado Pool Pool mining</title>
+  <link rel="stylesheet" href="/app.css?v=20260405a">
 </head>
 <body data-page="dashboard">
   <div class="backdrop"></div>
   <main class="shell">
-    <section class="hero">
-      <h1>Qado Pool:</h1>
+    <header class="topbar">
+      <div class="topbar-brand">
+        <p class="eyebrow">Qado Pool</p>
+        <strong>Pool portal</strong>
+      </div>
+      <div class="topbar-menu">
+        <button id="menuToggleButton" class="profile-toggle" type="button" aria-label="Open menu" aria-expanded="false">
+          <span id="profileGlyph">U</span>
+        </button>
+        <div id="profileMenu" class="card profile-menu hidden">
+          <p class="profile-menu-label">Signed in as</p>
+          <strong id="menuUsername">-</strong>
+          <a id="navDashboard" class="menu-link" href="/dashboard">Pool mining</a>
+          <a id="navWallet" class="menu-link" href="/wallet">Wallet</a>
+          <a id="navQadoPay" class="menu-link" href="/qado-pay">Qado Pay</a>
+          <button id="profileSignOutButton" class="secondary-button menu-signout" type="button">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="hero page-hero">
+      <h1>Pool mining</h1>
+      <p class="lede">Pool balances, withdrawals and mining stats in one place.</p>
     </section>
 
     <p id="notice" class="notice page-notice hidden" aria-live="polite"></p>
 
-    <article class="card dashboard-header">
-      <div>
-        <p class="eyebrow">Session</p>
-        <h2 id="sessionStatus">Authenticated</h2>
-      </div>
-      <div class="dashboard-actions">
-        <button id="signOutButton" class="secondary-button" type="button">Sign out</button>
-      </div>
-    </article>
-
     <section class="grid">
       <article class="card wide">
-        <h2>Account</h2>
+        <h2>Pool mining</h2>
         <div class="stats">
           <div><span>User</span><strong id="meUsername">-</strong></div>
-          <div><span>Available</span><strong id="balAvailable">0.0</strong></div>
-          <div><span>Pending</span><strong id="balPending">0.0</strong></div>
-          <div><span>Mined</span><strong id="balMined">0.0</strong></div>
-          <div><span>Immature mining</span><strong id="balImmatureMining">0.0</strong></div>
-          <div><span>Deposited</span><strong id="balDeposited">0.0</strong></div>
-          <div><span>Withdrawn</span><strong id="balWithdrawn">0.0</strong></div>
+          <div><span>Available (QADO)</span><strong id="balAvailable">0.0</strong></div>
+          <div><span>Pending withdrawals (QADO)</span><strong id="balPendingWithdrawals">0.0</strong></div>
+          <div><span>Pending deposits (QADO)</span><strong id="balPendingDeposits">0.0</strong></div>
+          <div><span>Mined (QADO)</span><strong id="balMined">0.0</strong></div>
+          <div><span>Immature mining (QADO)</span><strong id="balImmatureMining">0.0</strong></div>
+          <div><span>Deposited (QADO)</span><strong id="balDeposited">0.0</strong></div>
+          <div><span>Withdrawn (QADO)</span><strong id="balWithdrawn">0.0</strong></div>
+          <div><span>Pool fee</span><strong id="poolFeePercent">0.00%</strong></div>
         </div>
         <div class="mono-block">
-          <span>Pool address</span>
+          <span>Mining API token</span>
+          <code id="minerApiToken">-</code>
+        </div>
+        <div class="mono-block">
+          <span>Deposit address</span>
           <code id="depositAddress">-</code>
         </div>
         <div class="mono-block">
-          <span>Stored withdrawal address</span>
+          <span>Withdrawal address</span>
           <code id="withdrawAddress">-</code>
-        </div>
-        <div class="mono-block">
-          <span>Miner API token</span>
-          <code id="accountMinerToken">-</code>
         </div>
       </article>
 
       <article class="card">
         <h2>Withdraw</h2>
-        <p id="withdrawHint" class="muted">Withdrawals are sent to your verified miner binding key.</p>
+        <p id="withdrawHint" class="muted">Withdrawals are enabled automatically once your account wallet and miner token are ready.</p>
         <form id="withdrawForm">
           <label>Amount<input name="amount" placeholder="12.5" required></label>
           <label>Fee<input name="fee" value="0" required></label>
@@ -61,44 +74,15 @@
         </form>
       </article>
 
-      <article class="card wide">
-        <h2>Miner binding</h2>
-        <p class="muted">Link one Ed25519 mining public key to your account via signed challenge. Sign the challenge off-browser with your miner key, then paste the signature back here.</p>
-        <form id="challengeForm" class="inline-form">
-          <label>Public key<input name="publicKey" placeholder="64-char lowercase hex" required></label>
-          <button type="submit">Create challenge</button>
-        </form>
-        <div class="mono-block">
-          <span>Challenge</span>
-          <code id="challengeText">-</code>
-        </div>
-        <form id="verifyForm" class="inline-form">
-          <label>Challenge id<input name="challengeId" required></label>
-          <label>Signature<input name="signature" placeholder="128-char hex signature" required></label>
-          <button type="submit">Verify miner</button>
-        </form>
-      </article>
-
-      <article class="card">
-        <h2>Payment</h2>
-        <form id="transferForm">
-          <label>Recipient username<input name="username" required></label>
-          <label>Amount<input name="amount" placeholder="1.25" required></label>
-          <label>Note<input name="note" placeholder="optional note"></label>
-          <button type="submit">Send payment</button>
-        </form>
-      </article>
-
       <article class="card full">
-        <h2>Transactions</h2>
+        <h2>Pool history</h2>
         <div id="ledgerHistoryList" class="history-list">
-          <p class="history-empty">No transactions yet.</p>
+          <p class="history-empty">No pool transactions yet.</p>
         </div>
       </article>
 
       <article class="card full">
         <h2>Mining stats</h2>
-        <button id="loadMinerStatsButton" type="button">Load miner stats</button>
         <div class="stats compact">
           <div><span>Public key</span><strong id="minerPublicKey">-</strong></div>
           <div><span>Difficulty</span><strong id="minerDifficulty">-</strong></div>
@@ -114,6 +98,6 @@
     </section>
   </main>
 
-  <script src="/app.js?v=20260327a" defer></script>
+  <script src="/app.js?v=20260405a" defer></script>
 </body>
 </html>

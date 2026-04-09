@@ -65,7 +65,9 @@ public sealed partial class PoolRepository
                 withdrawal_address_hex,
                 last_observed_deposit_atomic,
                 last_observed_deposit_height_text,
-                created_utc
+                created_utc,
+                custodian_public_key_hex,
+                protected_custodian_private_key_hex
             )
             VALUES (
                 $user_id,
@@ -77,7 +79,9 @@ public sealed partial class PoolRepository
                 $withdrawal_address_hex,
                 $last_observed_deposit_atomic,
                 $last_observed_deposit_height_text,
-                $created_utc
+                $created_utc,
+                $custodian_public_key_hex,
+                $protected_custodian_private_key_hex
             );
             """,
             ("$user_id", user.UserId),
@@ -89,7 +93,9 @@ public sealed partial class PoolRepository
             ("$withdrawal_address_hex", user.WithdrawalAddressHex),
             ("$last_observed_deposit_atomic", user.LastObservedDepositAtomic),
             ("$last_observed_deposit_height_text", user.LastObservedDepositHeightText),
-            ("$created_utc", ToDb(user.CreatedUtc)));
+            ("$created_utc", ToDb(user.CreatedUtc)),
+            ("$custodian_public_key_hex", user.CustodianPublicKeyHex),
+            ("$protected_custodian_private_key_hex", user.ProtectedCustodianPrivateKeyHex));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -112,7 +118,9 @@ public sealed partial class PoolRepository
                 withdrawal_address_hex,
                 last_observed_deposit_atomic,
                 last_observed_deposit_height_text,
-                created_utc
+                created_utc,
+                custodian_public_key_hex,
+                protected_custodian_private_key_hex
             FROM users
             WHERE username = $username
             LIMIT 1;
@@ -141,7 +149,9 @@ public sealed partial class PoolRepository
                 withdrawal_address_hex,
                 last_observed_deposit_atomic,
                 last_observed_deposit_height_text,
-                created_utc
+                created_utc,
+                custodian_public_key_hex,
+                protected_custodian_private_key_hex
             FROM users
             WHERE user_id = $user_id
             LIMIT 1;
@@ -178,9 +188,54 @@ public sealed partial class PoolRepository
                 withdrawal_address_hex,
                 last_observed_deposit_atomic,
                 last_observed_deposit_height_text,
-                created_utc
+                created_utc,
+                custodian_public_key_hex,
+                protected_custodian_private_key_hex
             FROM users
             WHERE user_id IN ({placeholders});
+            """,
+            parameters);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            items.Add(MapUser(reader));
+        }
+
+        return items;
+    }
+
+    public async Task<List<PoolUser>> GetUsersByCustodianPublicKeysAsync(IReadOnlyCollection<string> publicKeyHexes, CancellationToken cancellationToken = default)
+    {
+        if (publicKeyHexes.Count == 0)
+        {
+            return [];
+        }
+
+        var parameters = publicKeyHexes
+            .Distinct(StringComparer.Ordinal)
+            .Select((value, index) => ($"$custodian_public_key_{index}", (object?)value))
+            .ToArray();
+
+        var placeholders = string.Join(", ", parameters.Select(parameter => parameter.Item1));
+        var items = new List<PoolUser>();
+
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(connection, null, $"""
+            SELECT
+                user_id,
+                username,
+                password_hash_hex,
+                password_salt_hex,
+                deposit_address_hex,
+                protected_deposit_private_key_hex,
+                withdrawal_address_hex,
+                last_observed_deposit_atomic,
+                last_observed_deposit_height_text,
+                created_utc,
+                custodian_public_key_hex,
+                protected_custodian_private_key_hex
+            FROM users
+            WHERE custodian_public_key_hex IN ({placeholders});
             """,
             parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -207,7 +262,9 @@ public sealed partial class PoolRepository
                 withdrawal_address_hex,
                 last_observed_deposit_atomic,
                 last_observed_deposit_height_text,
-                created_utc
+                created_utc,
+                custodian_public_key_hex,
+                protected_custodian_private_key_hex
             FROM users
             ORDER BY username;
             """);
@@ -569,73 +626,6 @@ public sealed partial class PoolRepository
         }
 
         return items;
-    }
-
-    public async Task InsertChallengeAsync(MinerChallenge challenge, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = CreateCommand(connection, null, """
-            INSERT INTO challenges (
-                challenge_id,
-                user_id,
-                public_key_hex,
-                message,
-                created_utc,
-                expires_utc,
-                consumed_utc
-            )
-            VALUES (
-                $challenge_id,
-                $user_id,
-                $public_key_hex,
-                $message,
-                $created_utc,
-                $expires_utc,
-                $consumed_utc
-            );
-            """,
-            ("$challenge_id", challenge.ChallengeId),
-            ("$user_id", challenge.UserId),
-            ("$public_key_hex", challenge.PublicKeyHex),
-            ("$message", challenge.Message),
-            ("$created_utc", ToDb(challenge.CreatedUtc)),
-            ("$expires_utc", ToDb(challenge.ExpiresUtc)),
-            ("$consumed_utc", challenge.ConsumedUtc is null ? null : ToDb(challenge.ConsumedUtc.Value)));
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task<MinerChallenge?> GetChallengeByIdAsync(string challengeId, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = CreateCommand(connection, null, """
-            SELECT
-                challenge_id,
-                user_id,
-                public_key_hex,
-                message,
-                created_utc,
-                expires_utc,
-                consumed_utc
-            FROM challenges
-            WHERE challenge_id = $challenge_id
-            LIMIT 1;
-            """,
-            ("$challenge_id", challengeId));
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? MapChallenge(reader) : null;
-    }
-
-    public async Task ConsumeChallengeAsync(string challengeId, DateTimeOffset consumedUtc, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = CreateCommand(connection, null, """
-            UPDATE challenges
-            SET consumed_utc = $consumed_utc
-            WHERE challenge_id = $challenge_id;
-            """,
-            ("$challenge_id", challengeId),
-            ("$consumed_utc", ToDb(consumedUtc)));
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<PoolRound?> GetOpenRoundAsync(CancellationToken cancellationToken = default)
@@ -1642,17 +1632,27 @@ public sealed partial class PoolRepository
     public async Task<long> GetTotalTrackedBalanceAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = CreateCommand(connection, null, "SELECT COALESCE(SUM(available_atomic + pending_withdrawal_atomic), 0) FROM balances;");
-        var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
+        return await GetTotalTrackedBalanceAsync(connection, null, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<long> GetTotalImmatureMiningObligationAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        return await GetTotalImmatureMiningObligationAsync(connection, null, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<long> GetTotalTrackedBalanceAsync(SqliteConnection connection, SqliteTransaction? transaction, CancellationToken cancellationToken = default)
+    {
+        await using var command = CreateCommand(connection, transaction, "SELECT COALESCE(SUM(available_atomic + pending_withdrawal_atomic), 0) FROM balances;");
+        var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
+    }
+
+    internal async Task<long> GetTotalImmatureMiningObligationAsync(SqliteConnection connection, SqliteTransaction? transaction, CancellationToken cancellationToken = default)
+    {
         await using var command = CreateCommand(
             connection,
-            null,
+            transaction,
             "SELECT COALESCE(SUM(amount_atomic), 0) FROM found_block_payouts WHERE status = $status;",
             ("$status", (int)FoundBlockPayoutStatus.Pending));
         var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
@@ -1733,7 +1733,9 @@ public sealed partial class PoolRepository
             reader.IsDBNull(6) ? null : reader.GetString(6),
             reader.GetInt64(7),
             reader.GetString(8),
-            ParseDbTime(reader.GetString(9)));
+            ParseDbTime(reader.GetString(9)),
+            reader.IsDBNull(10) ? null : reader.GetString(10),
+            reader.IsDBNull(11) ? null : reader.GetString(11));
     }
 
     private static UserSession MapSession(SqliteDataReader reader)
@@ -1760,18 +1762,6 @@ public sealed partial class PoolRepository
             ParseDbTime(reader.GetString(7)),
             ParseDbTime(reader.GetString(8)),
             reader.IsDBNull(9) ? null : ParseDbTime(reader.GetString(9)));
-    }
-
-    private static MinerChallenge MapChallenge(SqliteDataReader reader)
-    {
-        return new MinerChallenge(
-            reader.GetString(0),
-            reader.GetString(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            ParseDbTime(reader.GetString(4)),
-            ParseDbTime(reader.GetString(5)),
-            reader.IsDBNull(6) ? null : ParseDbTime(reader.GetString(6)));
     }
 
     private static PoolRound MapRound(SqliteDataReader reader)

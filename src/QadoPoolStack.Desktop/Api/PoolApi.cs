@@ -5,6 +5,7 @@ using QadoPoolStack.Desktop.Api.Models;
 using QadoPoolStack.Desktop.Configuration;
 using QadoPoolStack.Desktop.Domain;
 using QadoPoolStack.Desktop.Hosting;
+using QadoPoolStack.Desktop.Infrastructure.Logging;
 using QadoPoolStack.Desktop.Persistence;
 using QadoPoolStack.Desktop.Services.Accounts;
 using QadoPoolStack.Desktop.Services.Mining;
@@ -27,11 +28,20 @@ public static class PoolApi
             timestampUtc = DateTimeOffset.UtcNow
         }));
 
-        app.MapPost("/user/register", async (RegisterRequest request, UserAccountService accounts, SessionService sessions, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        app.MapPost("/user/register", async (RegisterRequest request, UserAccountService accounts, CustodianWalletService walletService, MinerAuthService minerAuth, PoolRepository repository, PoolLogger logger, PoolSettings settings, CancellationToken ct) =>
         {
             try
             {
                 var result = await accounts.RegisterAsync(request.Username, request.Password, settings, ct).ConfigureAwait(false);
+                try
+                {
+                    _ = await EnsureAccountMiningReadyAsync(result.User, walletService, minerAuth, repository, settings, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn("Auth", $"Automatic miner provisioning after register failed for user={result.User.Username}: {ex.Message}");
+                }
+
                 return Results.Ok(new AuthResponse(result.User.Username, result.SessionToken, GetPoolDepositAddress(settings)));
             }
             catch (Exception ex)
@@ -40,11 +50,20 @@ public static class PoolApi
             }
         }).RequireRateLimiting(PoolRateLimiting.PublicAuthPolicy);
 
-        app.MapPost("/user/login", async (LoginRequest request, UserAccountService accounts, PoolSettings settings, CancellationToken ct) =>
+        app.MapPost("/user/login", async (LoginRequest request, UserAccountService accounts, CustodianWalletService walletService, MinerAuthService minerAuth, PoolRepository repository, PoolLogger logger, PoolSettings settings, CancellationToken ct) =>
         {
             try
             {
                 var result = await accounts.LoginAsync(request.Username, request.Password, settings, ct).ConfigureAwait(false);
+                try
+                {
+                    _ = await EnsureAccountMiningReadyAsync(result.User, walletService, minerAuth, repository, settings, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn("Auth", $"Automatic miner provisioning after login failed for user={result.User.Username}: {ex.Message}");
+                }
+
                 return Results.Ok(new AuthResponse(result.User.Username, result.SessionToken, GetPoolDepositAddress(settings)));
             }
             catch (Exception ex)
@@ -53,7 +72,7 @@ public static class PoolApi
             }
         }).RequireRateLimiting(PoolRateLimiting.PublicAuthPolicy);
 
-        app.MapGet("/user/me", async (SessionService sessions, UserAccountService accounts, PoolRepository repository, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        app.MapGet("/user/me", async (SessionService sessions, UserAccountService accounts, CustodianWalletService walletService, MinerAuthService minerAuth, PoolRepository repository, PoolSettings settings, HttpContext http, CancellationToken ct) =>
         {
             var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
             if (user is null)
@@ -61,20 +80,23 @@ public static class PoolApi
                 return Results.Unauthorized();
             }
 
+            (user, var miner) = await EnsureAccountMiningReadyAsync(user, walletService, minerAuth, repository, settings, ct).ConfigureAwait(false);
             var balance = await accounts.GetBalanceAsync(user.UserId, ct).ConfigureAwait(false);
             var immatureMining = await repository.GetUserImmatureMiningAtomicAsync(user.UserId, ct).ConfigureAwait(false);
-            var miner = await repository.GetMinerByUserIdAsync(user.UserId, ct).ConfigureAwait(false);
+            var pendingDeposits = await repository.GetPendingIncomingDepositAtomicForUserAsync(user.UserId, settings.DepositMinConfirmations, ct).ConfigureAwait(false);
             return Results.Ok(new MeResponse(
                 user.Username,
                 GetPoolDepositAddress(settings),
                 user.WithdrawalAddressHex ?? miner?.PublicKeyHex,
-                ToBalanceDto(balance, immatureMining),
+                ToBalanceDto(balance, immatureMining, pendingDeposits),
+                ToPoolFeePercent(settings.PoolFeeBasisPoints),
                 miner?.PublicKeyHex,
                 miner is null ? null : DifficultyCalibration.ToCalibratedDifficulty(miner.ShareDifficulty, settings),
-                miner?.ApiTokenText));
+                miner?.ApiTokenText,
+                user.CustodianPublicKeyHex));
         }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
 
-        app.MapPost("/auth/challenge", async (ChallengeRequest request, SessionService sessions, MinerAuthService minerAuth, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        app.MapPost("/miner/bind", async (SessionService sessions, MinerAuthService minerAuth, PoolSettings settings, HttpContext http, CancellationToken ct) =>
         {
             var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
             if (user is null)
@@ -84,8 +106,8 @@ public static class PoolApi
 
             try
             {
-                var challenge = await minerAuth.CreateChallengeAsync(user, request.PublicKey, settings, ct).ConfigureAwait(false);
-                return Results.Ok(new { challenge.ChallengeId, challenge.Message, challenge.ExpiresUtc });
+                var result = await minerAuth.BindCustodianWalletAsync(user, settings, ct).ConfigureAwait(false);
+                return Results.Ok(new MinerAuthResponse(result.Miner.PublicKeyHex, result.ApiToken, DifficultyCalibration.ToCalibratedDifficulty(result.Miner.ShareDifficulty, settings)));
             }
             catch (Exception ex)
             {
@@ -93,7 +115,7 @@ public static class PoolApi
             }
         }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
 
-        app.MapPost("/auth/verify", async (VerifyChallengeRequest request, SessionService sessions, MinerAuthService minerAuth, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        app.MapGet("/wallet/summary", async (SessionService sessions, CustodianWalletService walletService, MinerAuthService minerAuth, PoolRepository repository, PoolSettings settings, HttpContext http, CancellationToken ct) =>
         {
             var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
             if (user is null)
@@ -103,8 +125,160 @@ public static class PoolApi
 
             try
             {
-                var result = await minerAuth.VerifyChallengeAsync(user, request.ChallengeId, request.Signature, settings, ct).ConfigureAwait(false);
-                return Results.Ok(new MinerAuthResponse(result.Miner.PublicKeyHex, result.ApiToken, DifficultyCalibration.ToCalibratedDifficulty(result.Miner.ShareDifficulty, settings)));
+                (user, _) = await EnsureAccountMiningReadyAsync(user, walletService, minerAuth, repository, settings, ct).ConfigureAwait(false);
+                var wallet = await walletService.GetSnapshotAsync(user, ct).ConfigureAwait(false);
+                return Results.Ok(ToWalletSummaryDto(wallet));
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
+
+        app.MapPost("/wallet/keypair", async (SessionService sessions, CustodianWalletService walletService, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        {
+            var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            try
+            {
+                var updatedUser = await walletService.CreateKeyPairAsync(user, ct).ConfigureAwait(false);
+                return Results.Ok(new WalletKeyPairResponse(updatedUser.CustodianPublicKeyHex ?? string.Empty));
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
+
+        app.MapPost("/wallet/send", async (WalletSendRequest request, SessionService sessions, CustodianWalletService walletService, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        {
+            var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            if (!AmountUtility.TryParseToAtomic(request.Amount, out var amountAtomic))
+            {
+                return Results.BadRequest(new { error = "Invalid amount." });
+            }
+
+            var feeText = string.IsNullOrWhiteSpace(request.Fee) ? "0" : request.Fee;
+            if (!AmountUtility.TryParseToAtomic(feeText, out var feeAtomic))
+            {
+                return Results.BadRequest(new { error = "Invalid fee." });
+            }
+
+            try
+            {
+                var result = await walletService.SendTransactionAsync(user, request.Address, amountAtomic, feeAtomic, request.Note, ct).ConfigureAwait(false);
+                return Results.Ok(new WalletSendResponse(
+                    result.TxId,
+                    result.RecipientAddressHex,
+                    AmountUtility.FormatAtomic(result.AmountAtomic),
+                    AmountUtility.FormatAtomic(result.FeeAtomic)));
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
+
+        app.MapPost("/wallet/address-book", async (WalletAddressBookRequest request, SessionService sessions, CustodianWalletService walletService, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        {
+            var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            try
+            {
+                var item = await walletService.AddAddressBookEntryAsync(user, request.Label, request.Address, ct).ConfigureAwait(false);
+                return Results.Ok(ToWalletAddressBookDto(item));
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
+
+        app.MapDelete("/wallet/address-book/{contactId}", async (string contactId, SessionService sessions, CustodianWalletService walletService, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        {
+            var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            try
+            {
+                await walletService.DeleteAddressBookEntryAsync(user, contactId, ct).ConfigureAwait(false);
+                return Results.Ok(new { status = "ok" });
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
+
+        app.MapGet("/qado-pay/summary", async (SessionService sessions, QadoPayService qadoPayService, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        {
+            var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            try
+            {
+                var summary = await qadoPayService.GetSnapshotAsync(user, ct).ConfigureAwait(false);
+                return Results.Ok(new QadoPaySummaryResponse(
+                    summary.Contacts.Select(ToQadoPayAddressBookDto).ToArray(),
+                    summary.Payments.Select(ToQadoPayPaymentDto).ToArray(),
+                    ToQadoPayOverviewDto(summary.Overview)));
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
+
+        app.MapPost("/qado-pay/address-book", async (QadoPayAddressBookRequest request, SessionService sessions, QadoPayService qadoPayService, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        {
+            var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            try
+            {
+                var item = await qadoPayService.AddAddressBookEntryAsync(user, request.Label, request.Username, ct).ConfigureAwait(false);
+                return Results.Ok(ToQadoPayAddressBookDto(item));
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
+
+        app.MapDelete("/qado-pay/address-book/{contactId}", async (string contactId, SessionService sessions, QadoPayService qadoPayService, PoolSettings settings, HttpContext http, CancellationToken ct) =>
+        {
+            var user = await RequireUserAsync(http, sessions, settings, ct).ConfigureAwait(false);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            try
+            {
+                await qadoPayService.DeleteAddressBookEntryAsync(user, contactId, ct).ConfigureAwait(false);
+                return Results.Ok(new { status = "ok" });
             }
             catch (Exception ex)
             {
@@ -198,7 +372,8 @@ public static class PoolApi
 
             var balance = await accounts.GetBalanceAsync(user.UserId, ct).ConfigureAwait(false);
             var immatureMining = await repository.GetUserImmatureMiningAtomicAsync(user.UserId, ct).ConfigureAwait(false);
-            return Results.Ok(new DepositResponse(GetPoolDepositAddress(settings), ToBalanceDto(balance, immatureMining)));
+            var pendingDeposits = await repository.GetPendingIncomingDepositAtomicForUserAsync(user.UserId, settings.DepositMinConfirmations, ct).ConfigureAwait(false);
+            return Results.Ok(new DepositResponse(GetPoolDepositAddress(settings), ToBalanceDto(balance, immatureMining, pendingDeposits)));
         }).RequireRateLimiting(PoolRateLimiting.UserApiPolicy);
 
         app.MapPost("/withdraw", async (WithdrawRequest request, SessionService sessions, LedgerService ledgerService, PoolSettings settings, HttpContext http, CancellationToken ct) =>
@@ -297,6 +472,41 @@ public static class PoolApi
         return await minerAuth.GetMinerFromApiTokenAsync(token, cancellationToken).ConfigureAwait(false);
     }
 
+    private static async Task<(PoolUser User, MinerRecord? Miner)> EnsureAccountMiningReadyAsync(
+        PoolUser user,
+        CustodianWalletService walletService,
+        MinerAuthService minerAuth,
+        PoolRepository repository,
+        PoolSettings settings,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(user.CustodianPublicKeyHex))
+        {
+            user = await walletService.CreateKeyPairAsync(user, cancellationToken).ConfigureAwait(false);
+        }
+
+        MinerRecord? miner = await repository.GetMinerByUserIdAsync(user.UserId, cancellationToken).ConfigureAwait(false);
+        var expectedPublicKey = string.IsNullOrWhiteSpace(user.CustodianPublicKeyHex)
+            ? null
+            : HexUtility.NormalizeLower(user.CustodianPublicKeyHex, 32);
+
+        var needsBinding = !string.IsNullOrWhiteSpace(expectedPublicKey) &&
+            (miner is null
+             || !miner.IsVerified
+             || !string.Equals(miner.PublicKeyHex, expectedPublicKey, StringComparison.Ordinal)
+             || string.IsNullOrWhiteSpace(miner.ApiTokenText));
+
+        if (needsBinding)
+        {
+            var result = await minerAuth.BindCustodianWalletAsync(user, settings, cancellationToken).ConfigureAwait(false);
+            miner = result.Miner;
+            user = await repository.GetUserByIdAsync(user.UserId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("Account owner no longer exists.");
+        }
+
+        return (user, miner);
+    }
+
     private static string? GetBearerToken(HttpContext http)
     {
         var authorization = http.Request.Headers.Authorization.ToString();
@@ -308,22 +518,114 @@ public static class PoolApi
         return null;
     }
 
-    private static BalanceDto ToBalanceDto(QadoPoolStack.Desktop.Domain.BalanceRecord? balance, long immatureMiningAtomic)
+    private static BalanceDto ToBalanceDto(QadoPoolStack.Desktop.Domain.BalanceRecord? balance, long immatureMiningAtomic, long pendingDepositAtomic)
     {
         return new BalanceDto(
             AmountUtility.FormatAtomic(balance?.AvailableAtomic ?? 0),
             AmountUtility.FormatAtomic(balance?.PendingWithdrawalAtomic ?? 0),
+            AmountUtility.FormatAtomic(pendingDepositAtomic),
             AmountUtility.FormatAtomic(balance?.TotalMinedAtomic ?? 0),
             AmountUtility.FormatAtomic(balance?.TotalDepositedAtomic ?? 0),
             AmountUtility.FormatAtomic(balance?.TotalWithdrawnAtomic ?? 0),
             AmountUtility.FormatAtomic(immatureMiningAtomic));
     }
 
+    private static string ToPoolFeePercent(int basisPoints)
+        => $"{basisPoints / 100d:0.00}%";
+
     private static string GetPoolDepositAddress(PoolSettings settings)
         => string.IsNullOrWhiteSpace(settings.PoolMinerPublicKey) ? "" : settings.PoolMinerPublicKey;
 
+    private static WalletSummaryResponse ToWalletSummaryDto(CustodianWalletSnapshot wallet)
+    {
+        return new WalletSummaryResponse(
+            !string.IsNullOrWhiteSpace(wallet.PublicKeyHex),
+            wallet.PublicKeyHex,
+            new WalletBalanceResponse(
+                AmountUtility.FormatAtomic(wallet.BalanceAtomic),
+                wallet.PendingOutgoingCount,
+                wallet.PendingIncomingCount),
+            wallet.Transactions.Select(ToWalletTransactionDto).ToArray(),
+            wallet.Contacts.Select(ToWalletAddressBookDto).ToArray());
+    }
+
+    private static WalletTransactionItemResponse ToWalletTransactionDto(CustodianWalletTimelineItem item)
+    {
+        return new WalletTransactionItemResponse(
+            item.TransactionId,
+            item.Direction,
+            item.CounterpartyAddressHex,
+            AmountUtility.FormatAtomic(item.AmountAtomic),
+            AmountUtility.FormatAtomic(item.FeeAtomic),
+            item.Note,
+            item.TxId,
+            item.Status,
+            item.CreatedUtc);
+    }
+
+    private static WalletAddressBookItemResponse ToWalletAddressBookDto(WalletContactRecord item)
+    {
+        return new WalletAddressBookItemResponse(
+            item.ContactId,
+            item.Label,
+            item.AddressHex,
+            item.CreatedUtc);
+    }
+
+    private static QadoPayAddressBookItemResponse ToQadoPayAddressBookDto(QadoPayContactRecord item)
+    {
+        return new QadoPayAddressBookItemResponse(
+            item.ContactId,
+            item.Label,
+            item.Username,
+            item.CreatedUtc);
+    }
+
+    private static QadoPayPaymentItemResponse ToQadoPayPaymentDto(LedgerEntryRecord entry)
+    {
+        var metadata = TryParseMetadata(entry.MetadataJson);
+        var isOutgoing = entry.EntryType == LedgerEntryType.InternalTransferOut;
+        var username = isOutgoing
+            ? ReadMetadataString(metadata, "to") ?? StripReferencePrefix(entry.Reference, "transfer:") ?? "-"
+            : ReadMetadataString(metadata, "from") ?? StripReferencePrefix(entry.Reference, "transfer:") ?? "-";
+
+        return new QadoPayPaymentItemResponse(
+            entry.LedgerEntryId,
+            isOutgoing ? "outgoing" : "incoming",
+            username,
+            AmountUtility.FormatAtomic(Math.Abs(entry.DeltaAtomic)),
+            string.IsNullOrWhiteSpace(ReadMetadataString(metadata, "note")) ? null : ReadMetadataString(metadata, "note"),
+            entry.CreatedUtc);
+    }
+
+    private static QadoPayOverviewResponse ToQadoPayOverviewDto(QadoPayOverview overview)
+    {
+        return new QadoPayOverviewResponse(
+            AmountUtility.FormatAtomic(overview.SentTodayAtomic),
+            AmountUtility.FormatAtomic(overview.ReceivedTodayAtomic),
+            AmountUtility.FormatAtomic(overview.ReceivedTodayAtomic - overview.SentTodayAtomic),
+            overview.LastPayment is null ? null : ToQadoPayLastPaymentDto(overview.LastPayment));
+    }
+
+    private static QadoPayLastPaymentResponse ToQadoPayLastPaymentDto(LedgerEntryRecord entry)
+    {
+        var metadata = TryParseMetadata(entry.MetadataJson);
+        var isOutgoing = entry.EntryType == LedgerEntryType.InternalTransferOut;
+        var username = isOutgoing
+            ? ReadMetadataString(metadata, "to") ?? StripReferencePrefix(entry.Reference, "transfer:") ?? "-"
+            : ReadMetadataString(metadata, "from") ?? StripReferencePrefix(entry.Reference, "transfer:") ?? "-";
+
+        return new QadoPayLastPaymentResponse(
+            isOutgoing ? "outgoing" : "incoming",
+            username,
+            AmountUtility.FormatAtomic(Math.Abs(entry.DeltaAtomic)),
+            entry.CreatedUtc);
+    }
+
     private static bool ShouldIncludeInHistory(LedgerEntryRecord entry)
-        => !(entry.EntryType == LedgerEntryType.WithdrawalRelease && entry.DeltaAtomic == 0);
+        => entry.EntryType is LedgerEntryType.DepositCredit
+            or LedgerEntryType.BlockReward
+            or LedgerEntryType.WithdrawalReserve;
 
     private static LedgerHistoryItemResponse ToLedgerHistoryDto(LedgerEntryRecord entry)
     {

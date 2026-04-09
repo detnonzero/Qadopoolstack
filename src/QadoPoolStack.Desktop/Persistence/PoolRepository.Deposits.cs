@@ -339,16 +339,16 @@ public sealed partial class PoolRepository
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task InsertIncomingDepositEventIfMissingAsync(IncomingDepositEvent depositEvent, CancellationToken cancellationToken = default)
+    public async Task UpsertIncomingDepositEventAsync(IncomingDepositEvent depositEvent, CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await InsertIncomingDepositEventIfMissingAsync(depositEvent, connection, null, cancellationToken).ConfigureAwait(false);
+        await UpsertIncomingDepositEventAsync(depositEvent, connection, null, cancellationToken).ConfigureAwait(false);
     }
 
-    internal async Task InsertIncomingDepositEventIfMissingAsync(IncomingDepositEvent depositEvent, SqliteConnection connection, SqliteTransaction? transaction, CancellationToken cancellationToken = default)
+    internal async Task UpsertIncomingDepositEventAsync(IncomingDepositEvent depositEvent, SqliteConnection connection, SqliteTransaction? transaction, CancellationToken cancellationToken = default)
     {
         await using var command = CreateCommand(connection, transaction, """
-            INSERT OR IGNORE INTO incoming_deposit_events (
+            INSERT INTO incoming_deposit_events (
                 event_id,
                 txid,
                 status,
@@ -389,7 +389,21 @@ public sealed partial class PoolRepository
                 $credited_utc,
                 $ignored_utc,
                 $ignore_reason
-            );
+            )
+            ON CONFLICT(event_id) DO UPDATE SET
+                txid = excluded.txid,
+                status = excluded.status,
+                block_height_text = excluded.block_height_text,
+                block_hash_hex = excluded.block_hash_hex,
+                confirmations_text = excluded.confirmations_text,
+                timestamp_utc = excluded.timestamp_utc,
+                to_address_hex = excluded.to_address_hex,
+                amount_atomic = excluded.amount_atomic,
+                from_address_hex = excluded.from_address_hex,
+                from_addresses_json = excluded.from_addresses_json,
+                tx_index = excluded.tx_index,
+                transfer_index = excluded.transfer_index,
+                observed_utc = excluded.observed_utc;
             """,
             ("$event_id", depositEvent.EventId),
             ("$txid", depositEvent.TxId),
@@ -411,6 +425,32 @@ public sealed partial class PoolRepository
             ("$ignored_utc", depositEvent.IgnoredUtc is null ? null : ToDb(depositEvent.IgnoredUtc.Value)),
             ("$ignore_reason", depositEvent.IgnoreReason));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<long> GetPendingIncomingDepositAtomicForUserAsync(string userId, int minConfirmations, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(connection, null, """
+            SELECT COALESCE(SUM(ide.amount_atomic), 0)
+            FROM incoming_deposit_events ide
+            INNER JOIN users u ON u.user_id = $user_id
+            WHERE ide.credited_user_id IS NULL
+              AND ide.ignored_utc IS NULL
+              AND u.custodian_public_key_hex IS NOT NULL
+              AND ide.timestamp_utc >= u.created_utc
+              AND (
+                    ide.from_address_hex = u.custodian_public_key_hex
+                    OR ide.from_addresses_json LIKE ('%"' || u.custodian_public_key_hex || '"%')
+                  )
+              AND (
+                    lower(ide.status) <> 'confirmed'
+                    OR CAST(ide.confirmations_text AS INTEGER) < $min_confirmations
+                  );
+            """,
+            ("$user_id", userId),
+            ("$min_confirmations", Math.Max(0, minConfirmations)));
+        var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return Convert.ToInt64(scalar, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public async Task<List<IncomingDepositEvent>> ListPendingIncomingDepositEventsAsync(int limit = 500, CancellationToken cancellationToken = default)

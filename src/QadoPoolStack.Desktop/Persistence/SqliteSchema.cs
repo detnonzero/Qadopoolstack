@@ -20,7 +20,9 @@ public static class SqliteSchema
                 withdrawal_address_hex TEXT NULL,
                 last_observed_deposit_atomic INTEGER NOT NULL DEFAULT 0,
                 last_observed_deposit_height_text TEXT NOT NULL DEFAULT '0',
-                created_utc TEXT NOT NULL
+                created_utc TEXT NOT NULL,
+                custodian_public_key_hex TEXT NULL,
+                protected_custodian_private_key_hex TEXT NULL
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -43,16 +45,6 @@ public static class SqliteSchema
                 verified_utc TEXT NOT NULL,
                 last_job_utc TEXT NOT NULL,
                 last_share_utc TEXT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS challenges (
-                challenge_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-                public_key_hex TEXT NOT NULL,
-                message TEXT NOT NULL,
-                created_utc TEXT NOT NULL,
-                expires_utc TEXT NOT NULL,
-                consumed_utc TEXT NULL
             );
 
             CREATE TABLE IF NOT EXISTS deposit_sender_challenges (
@@ -208,9 +200,37 @@ public static class SqliteSchema
                 updated_utc TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS wallet_contacts (
+                contact_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                label TEXT NOT NULL,
+                address_hex TEXT NOT NULL,
+                created_utc TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS qado_pay_contacts (
+                contact_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                label TEXT NOT NULL,
+                username TEXT NOT NULL,
+                created_utc TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS wallet_transactions (
+                wallet_transaction_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                direction TEXT NOT NULL,
+                counterparty_address_hex TEXT NOT NULL,
+                amount_atomic INTEGER NOT NULL,
+                fee_atomic INTEGER NOT NULL,
+                note TEXT NULL,
+                txid TEXT NULL,
+                status TEXT NOT NULL,
+                created_utc TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS ix_sessions_token_hash ON sessions(token_hash_hex);
             CREATE INDEX IF NOT EXISTS ix_sessions_expires_utc ON sessions(expires_utc);
-            CREATE INDEX IF NOT EXISTS ix_challenges_expires_utc ON challenges(expires_utc);
             CREATE INDEX IF NOT EXISTS ix_deposit_sender_challenges_expires_utc ON deposit_sender_challenges(expires_utc);
             CREATE INDEX IF NOT EXISTS ix_verified_deposit_senders_user_verified ON verified_deposit_senders(user_id, verified_utc);
             CREATE INDEX IF NOT EXISTS ix_incoming_deposit_events_uncredited ON incoming_deposit_events(credited_user_id, block_height_text, tx_index, transfer_index);
@@ -222,6 +242,12 @@ public static class SqliteSchema
             CREATE INDEX IF NOT EXISTS ix_ledger_user_created ON ledger_entries(user_id, created_utc);
             CREATE INDEX IF NOT EXISTS ix_ledger_entries_type_reference_created ON ledger_entries(entry_type, reference, created_utc);
             CREATE INDEX IF NOT EXISTS ix_withdrawals_status_requested ON withdrawal_requests(status, requested_utc);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_users_custodian_public_key ON users(custodian_public_key_hex);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_wallet_contacts_user_label ON wallet_contacts(user_id, label);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_wallet_contacts_user_address ON wallet_contacts(user_id, address_hex);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_qado_pay_contacts_user_label ON qado_pay_contacts(user_id, label);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_qado_pay_contacts_user_username ON qado_pay_contacts(user_id, username);
+            CREATE INDEX IF NOT EXISTS ix_wallet_transactions_user_created ON wallet_transactions(user_id, created_utc);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
@@ -229,6 +255,8 @@ public static class SqliteSchema
         await EnsureColumnAsync(connection, "incoming_deposit_events", "ignore_reason", "TEXT NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "shares", "difficulty_scaled", "INTEGER NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "miners", "api_token_text", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "users", "custodian_public_key_hex", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "users", "protected_custodian_private_key_hex", "TEXT NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "found_blocks", "status", "INTEGER NOT NULL DEFAULT 1", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "found_blocks", "confirmations_text", "TEXT NOT NULL DEFAULT '0'", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "found_blocks", "last_checked_utc", "TEXT NULL", cancellationToken).ConfigureAwait(false);
@@ -245,6 +273,12 @@ public static class SqliteSchema
             CREATE INDEX IF NOT EXISTS ix_found_blocks_status_accepted ON found_blocks(status, accepted_utc);
             CREATE INDEX IF NOT EXISTS ix_found_block_payouts_status_block ON found_block_payouts(status, block_id);
             CREATE INDEX IF NOT EXISTS ix_found_block_payouts_user_status ON found_block_payouts(user_id, status);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_users_custodian_public_key ON users(custodian_public_key_hex);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_wallet_contacts_user_label ON wallet_contacts(user_id, label);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_wallet_contacts_user_address ON wallet_contacts(user_id, address_hex);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_qado_pay_contacts_user_label ON qado_pay_contacts(user_id, label);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_qado_pay_contacts_user_username ON qado_pay_contacts(user_id, username);
+            CREATE INDEX IF NOT EXISTS ix_wallet_transactions_user_created ON wallet_transactions(user_id, created_utc);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qado Pool Wallet</title>
+  <link rel="stylesheet" href="/app.css?v=20260405a">
+</head>
+<body data-page="wallet">
+  <div class="backdrop"></div>
+  <main class="shell">
+    <header class="topbar">
+      <div class="topbar-brand">
+        <p class="eyebrow">Qado Pool</p>
+        <strong>Pool portal</strong>
+      </div>
+      <div class="topbar-menu">
+        <button id="menuToggleButton" class="profile-toggle" type="button" aria-label="Open menu" aria-expanded="false">
+          <span id="profileGlyph">U</span>
+        </button>
+        <div id="profileMenu" class="card profile-menu hidden">
+          <p class="profile-menu-label">Signed in as</p>
+          <strong id="menuUsername">-</strong>
+          <a id="navDashboard" class="menu-link" href="/dashboard">Pool mining</a>
+          <a id="navWallet" class="menu-link" href="/wallet">Wallet</a>
+          <a id="navQadoPay" class="menu-link" href="/qado-pay">Qado Pay</a>
+          <button id="profileSignOutButton" class="secondary-button menu-signout" type="button">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="hero page-hero">
+      <h1>Wallet</h1>
+      <p class="lede">Custodian wallet balance, transactions and address book in one place.</p>
+    </section>
+
+    <p id="notice" class="notice page-notice hidden" aria-live="polite"></p>
+
+    <section class="grid">
+      <article class="card wide">
+        <h2>Balance</h2>
+        <div id="walletReadyState">
+          <div class="stats compact">
+            <div><span>Balance</span><strong id="walletBalance">0.0</strong></div>
+            <div><span>Pending outgoing</span><strong id="walletPendingOutgoing">0</strong></div>
+            <div><span>Pending incoming</span><strong id="walletPendingIncoming">0</strong></div>
+          </div>
+          <div class="mono-block">
+            <span>Wallet address</span>
+            <code id="walletPublicKey">-</code>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <h2>Send transaction</h2>
+        <p class="muted">Transactions are signed by the backend with the custodian wallet private key stored for your account.</p>
+        <form id="walletSendForm">
+          <label>Recipient address<input name="address" placeholder="64-char lowercase hex" required></label>
+          <label>Amount<input name="amount" placeholder="1.25" required></label>
+          <label>Fee<input name="fee" value="0" required></label>
+          <label>Note<input name="note" placeholder="optional note"></label>
+          <button type="submit">Send transaction</button>
+        </form>
+      </article>
+
+      <article class="card full">
+        <h2>Address book</h2>
+        <form id="walletAddressBookForm" class="inline-form address-book-form">
+          <label>Label<input name="label" placeholder="Exchange" required></label>
+          <label>Address<input name="address" placeholder="64-char lowercase hex" required></label>
+          <button type="submit">Save address</button>
+        </form>
+        <div id="walletAddressBookList" class="address-book-list">
+          <p class="history-empty">No saved addresses yet.</p>
+        </div>
+      </article>
+
+      <article class="card full">
+        <h2>My transactions</h2>
+        <div id="walletTransactionsList" class="history-list">
+          <p class="history-empty">No wallet transactions yet.</p>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script src="/app.js?v=20260405a" defer></script>
+</body>
+</html>

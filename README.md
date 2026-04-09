@@ -15,10 +15,13 @@ The current UI intentionally uses the default WPF look and a minimal web dashboa
 
 - The desktop app is single-instance. Launching the EXE again activates the already running window instead of opening a second full instance.
 - The pool uses one shared on-chain deposit address: the configured pool mining public key.
-- Each user verifies exactly one miner public key through a signed challenge.
+- Each user gets one backend-managed custodian wallet keypair provisioned automatically.
+- Miner binding no longer uses a signed challenge. The backend binds the miner directly to the user's custodian wallet public key.
 - The verified miner binding key is also used as:
   - the sender identity for deposit matching
   - the stored withdrawal address
+- The web UI now exposes a menu-based authenticated shell with separate `Pool mining`, `Wallet`, and `Qado Pay` pages.
+- The wallet page shows on-chain wallet balance, outbound transactions, recent wallet activity, and an address book.
 - Deposits are credited when the pool sees an incoming on-chain transfer to the pool address and matches the transaction sender to a verified user key.
 - Withdrawals are created and broadcast by the pool through the connected Qado node.
 - The withdrawal fee is entered by the user, defaults to `0`, and is deducted from the requested withdrawal amount.
@@ -82,20 +85,28 @@ At startup the app creates its local runtime files under the executable director
 
 ## Web Routes
 
-The embedded web server serves three HTML entry points:
+The embedded web server serves five HTML entry points:
 
 - `/` -> login page only
 - `/register` -> registration page only
-- `/dashboard` -> authenticated user dashboard
+- `/dashboard` -> authenticated user `Pool mining` page
+- `/wallet` -> authenticated `Wallet` page
+- `/qado-pay` -> authenticated `Qado Pay` page
 
-The dashboard currently includes:
+The authenticated web UI now includes:
 
-- `Account`
-- `Withdraw`
-- `Miner binding`
-- `Payment`
-- `Transactions`
-- `Miner stats`
+- `Pool mining`
+  - `Pool mining`
+  - `Withdraw`
+  - `Pool history`
+  - `Miner stats`
+- `Wallet`
+  - `Balance`
+  - `Send transaction`
+  - `Address book`
+  - `My transactions`
+- `Qado Pay`
+  - `Payment`
 
 ## API Overview
 
@@ -116,19 +127,18 @@ These endpoints require the session token returned by login or register:
 - `POST /withdraw`
 - `POST /ledger/transfer`
 - `GET /ledger/history`
+- `POST /miner/bind`
+- `GET /wallet/summary`
+- `POST /wallet/keypair`
+- `POST /wallet/send`
+- `POST /wallet/address-book`
+- `DELETE /wallet/address-book/{contactId}`
 
 The session token is sent as:
 
 ```http
 Authorization: Bearer <session-token>
 ```
-
-### Session-authenticated miner binding API
-
-These endpoints require a valid user session because they bind a miner key to an account:
-
-- `POST /auth/challenge`
-- `POST /auth/verify`
 
 ### Miner-authenticated mining API
 
@@ -180,16 +190,24 @@ Default settings are:
 
 ### Miner binding
 
-- The user submits a miner public key.
-- The pool creates a signed challenge.
-- The user signs the exact challenge text outside the browser with the corresponding Ed25519 private key.
-- The pool verifies the signature and stores the miner record.
+- During account provisioning the backend creates the custodian wallet keypair automatically.
+- The backend stores the custodian wallet private key locally and exposes only the public key to the web UI.
+- The pool stores the miner record directly from the custodian wallet public key without a challenge/signature roundtrip.
+- The dashboard shows the miner API token directly above the shared pool address.
 
 The verified miner key is then used for:
 
 - mining authentication
 - deposit sender matching
 - the stored withdrawal address shown in the dashboard
+
+### Custodian wallet
+
+- Each account can have a backend-managed custodian wallet keypair.
+- The wallet page can create the keypair on demand.
+- The backend signs wallet transactions locally and broadcasts them through the connected Qado node.
+- Wallet activity combines locally stored outbound transactions with incoming events fetched from the node for the wallet address.
+- The wallet page also stores a simple per-user address book in SQLite.
 
 ### Deposits
 
@@ -269,7 +287,6 @@ Important fields include:
 - `ShareTargetSecondsMin`
 - `ShareTargetSecondsMax`
 - `ShareJobLifetimeSeconds`
-- `ChallengeLifetimeSeconds`
 - `SessionLifetimeHours`
 - `PoolFeeBasisPoints`
 - `AddressPollSeconds`
@@ -294,7 +311,6 @@ Current schema tables:
 - `users`
 - `sessions`
 - `miners`
-- `challenges`
 - `deposit_sender_challenges`
 - `verified_deposit_senders`
 - `deposit_sync_state`
@@ -306,11 +322,13 @@ Current schema tables:
 - `balances`
 - `ledger_entries`
 - `withdrawal_requests`
+- `wallet_contacts`
+- `wallet_transactions`
 
 Notes:
 
-- Some older deposit-related tables remain in the schema for compatibility, even though the current dashboard flow now centers on the verified miner binding key.
-- The `users` table still contains older per-user deposit key columns, but the current operational deposit flow uses the shared pool address plus sender matching.
+- Some older deposit-related tables remain in the schema for compatibility, even though miner binding now centers on the custodian wallet key.
+- The `users` table still contains older per-user deposit key columns, but the current operational wallet flow uses dedicated custodian wallet fields.
 
 ## Release Builds
 

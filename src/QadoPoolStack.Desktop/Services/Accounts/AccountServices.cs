@@ -37,9 +37,7 @@ public sealed class PasswordHasher
 
 public sealed record LoginResult(PoolUser User, string SessionToken);
 
-public sealed record MinerChallengeResult(string ChallengeId, string Message, DateTimeOffset ExpiresUtc);
-
-public sealed record MinerVerificationResult(MinerRecord Miner, string ApiToken);
+public sealed record MinerBindingResult(MinerRecord Miner, string ApiToken);
 
 public sealed class SessionService
 {
@@ -96,13 +94,24 @@ public sealed class UserAccountService
     private readonly PasswordHasher _passwordHasher;
     private readonly SecretProtector _secretProtector;
     private readonly SessionService _sessionService;
+    private readonly QadoNodeClient _nodeClient;
+    private readonly PoolLogger _logger;
+    private readonly SemaphoreSlim _registrationGate = new(1, 1);
 
-    public UserAccountService(PoolRepository repository, PasswordHasher passwordHasher, SecretProtector secretProtector, SessionService sessionService)
+    public UserAccountService(
+        PoolRepository repository,
+        PasswordHasher passwordHasher,
+        SecretProtector secretProtector,
+        SessionService sessionService,
+        QadoNodeClient nodeClient,
+        PoolLogger logger)
     {
         _repository = repository;
         _passwordHasher = passwordHasher;
         _secretProtector = secretProtector;
         _sessionService = sessionService;
+        _nodeClient = nodeClient;
+        _logger = logger;
     }
 
     public async Task<LoginResult> RegisterAsync(string username, string password, PoolSettings settings, CancellationToken cancellationToken = default)
@@ -115,29 +124,82 @@ public sealed class UserAccountService
         username = NormalizeUsername(username);
         ValidatePassword(password);
 
-        if (await _repository.GetUserByUsernameAsync(username, cancellationToken).ConfigureAwait(false) is not null)
+        await _registrationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException("Username already exists.");
+            if (await _repository.GetUserByUsernameAsync(username, cancellationToken).ConfigureAwait(false) is not null)
+            {
+                throw new InvalidOperationException("Username already exists.");
+            }
+
+            var (passwordSaltHex, passwordHashHex) = _passwordHasher.Hash(password);
+            var (depositPrivateKey, depositPublicKey) = KeyUtility.GenerateEd25519KeypairHex();
+
+            var user = new PoolUser(
+                Guid.NewGuid().ToString("N"),
+                username,
+                passwordHashHex,
+                passwordSaltHex,
+                depositPublicKey,
+                _secretProtector.Protect(depositPrivateKey),
+                null,
+                0,
+                "0",
+                DateTimeOffset.UtcNow);
+
+            var signupCreditAtomic = GetConfiguredSignupCreditAtomic(settings);
+            var poolOnChainBalanceAtomic = await TryGetPoolOnChainBalanceAsync(settings, cancellationToken).ConfigureAwait(false);
+
+            await _repository.ExecuteInTransactionAsync(async (connection, transaction) =>
+            {
+                await _repository.InsertUserAsync(user, connection, transaction, cancellationToken).ConfigureAwait(false);
+                await _repository.EnsureBalanceAsync(user.UserId, connection, transaction, cancellationToken).ConfigureAwait(false);
+
+                if (signupCreditAtomic <= 0 || poolOnChainBalanceAtomic is null)
+                {
+                    return;
+                }
+
+                var trackedSpendable = await _repository.GetTotalTrackedBalanceAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+                var immatureMining = await _repository.GetTotalImmatureMiningObligationAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+                var trackedObligations = checked(trackedSpendable + immatureMining);
+                var poolBalanceDelta = checked(poolOnChainBalanceAtomic.Value - trackedObligations);
+                if (poolBalanceDelta < signupCreditAtomic)
+                {
+                    _logger.Info("Auth", $"Skipped new account credit for user={user.Username}; delta={AmountUtility.FormatAtomic(poolBalanceDelta)} QADO is below required {AmountUtility.FormatAtomic(signupCreditAtomic)} QADO.");
+                    return;
+                }
+
+                var now = DateTimeOffset.UtcNow;
+                var configuredAmount = AmountUtility.FormatAtomic(signupCreditAtomic);
+                await _repository.UpdateBalanceAsync(user.UserId, signupCreditAtomic, 0, 0, 0, 0, connection, transaction, cancellationToken).ConfigureAwait(false);
+                await _repository.InsertLedgerEntryAsync(
+                    new LedgerEntryRecord(
+                        Guid.NewGuid().ToString("N"),
+                        user.UserId,
+                        LedgerEntryType.ManualAdjustment,
+                        signupCreditAtomic,
+                        "signup-credit",
+                        JsonSerializer.Serialize(new
+                        {
+                            reason = "new_account_credit",
+                            amount = configuredAmount,
+                            source = "pool_balance_delta"
+                        }),
+                        now),
+                    connection,
+                    transaction,
+                    cancellationToken).ConfigureAwait(false);
+                _logger.Info("Auth", $"Granted new account credit {configuredAmount} QADO to user={user.Username} using pool balance delta {AmountUtility.FormatAtomic(poolBalanceDelta)} QADO.");
+            }, cancellationToken).ConfigureAwait(false);
+
+            var sessionToken = await _sessionService.CreateSessionAsync(user.UserId, settings, cancellationToken).ConfigureAwait(false);
+            return new LoginResult(user, sessionToken);
         }
-
-        var (passwordSaltHex, passwordHashHex) = _passwordHasher.Hash(password);
-        var (depositPrivateKey, depositPublicKey) = KeyUtility.GenerateEd25519KeypairHex();
-
-        var user = new PoolUser(
-            Guid.NewGuid().ToString("N"),
-            username,
-            passwordHashHex,
-            passwordSaltHex,
-            depositPublicKey,
-            _secretProtector.Protect(depositPrivateKey),
-            null,
-            0,
-            "0",
-            DateTimeOffset.UtcNow);
-
-        await _repository.InsertUserAsync(user, cancellationToken).ConfigureAwait(false);
-        var sessionToken = await _sessionService.CreateSessionAsync(user.UserId, settings, cancellationToken).ConfigureAwait(false);
-        return new LoginResult(user, sessionToken);
+        finally
+        {
+            _registrationGate.Release();
+        }
     }
 
     public async Task<LoginResult> LoginAsync(string username, string password, PoolSettings settings, CancellationToken cancellationToken = default)
@@ -188,74 +250,90 @@ public sealed class UserAccountService
             throw new InvalidOperationException("Password must be at least 10 characters.");
         }
     }
+
+    private static long GetConfiguredSignupCreditAtomic(PoolSettings settings)
+    {
+        if (!AmountUtility.TryParseToAtomic(settings.NewAccountCreditAmount, out var atomic))
+        {
+            throw new InvalidOperationException("Configured new account credit amount is invalid.");
+        }
+
+        return atomic;
+    }
+
+    private async Task<long?> TryGetPoolOnChainBalanceAsync(PoolSettings settings, CancellationToken cancellationToken)
+    {
+        if (GetConfiguredSignupCreditAtomic(settings) <= 0)
+        {
+            return null;
+        }
+
+        if (!HexUtility.IsHex(settings.PoolMinerPublicKey, 32))
+        {
+            _logger.Warn("Auth", "Skipping new account credit because the pool address is not configured.");
+            return null;
+        }
+
+        try
+        {
+            var addressState = await _nodeClient.GetAddressAsync(settings.PoolMinerPublicKey, cancellationToken).ConfigureAwait(false);
+            if (addressState is null)
+            {
+                _logger.Warn("Auth", "Skipping new account credit because the pool address state is unavailable.");
+                return null;
+            }
+
+            if (!ulong.TryParse(addressState.BalanceAtomic, NumberStyles.None, CultureInfo.InvariantCulture, out var balanceAtomic))
+            {
+                _logger.Warn("Auth", "Skipping new account credit because the node returned an invalid pool balance.");
+                return null;
+            }
+
+            if (balanceAtomic > long.MaxValue)
+            {
+                _logger.Warn("Auth", "Skipping new account credit because the pool balance exceeds the supported range.");
+                return null;
+            }
+
+            return (long)balanceAtomic;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn("Auth", $"Skipping new account credit because the pool balance could not be loaded: {ex.Message}");
+            return null;
+        }
+    }
 }
 
 public sealed class MinerAuthService
 {
     private readonly PoolRepository _repository;
-    private readonly PoolLogger _logger;
 
-    public MinerAuthService(PoolRepository repository, PoolLogger logger)
+    public MinerAuthService(PoolRepository repository)
     {
         _repository = repository;
-        _logger = logger;
     }
 
-    public async Task<MinerChallengeResult> CreateChallengeAsync(PoolUser user, string publicKeyHex, PoolSettings settings, CancellationToken cancellationToken = default)
+    public async Task<MinerBindingResult> BindCustodianWalletAsync(PoolUser user, PoolSettings settings, CancellationToken cancellationToken = default)
     {
-        publicKeyHex = HexUtility.NormalizeLower(publicKeyHex, 32);
-
-        var challengeId = Guid.NewGuid().ToString("N");
-        var createdUtc = DateTimeOffset.UtcNow;
-        var expiresUtc = createdUtc.AddSeconds(settings.ChallengeLifetimeSeconds);
-        var message = $"qadopool-auth:{challengeId}:{publicKeyHex}:{createdUtc.ToUnixTimeSeconds()}";
-
-        var challenge = new MinerChallenge(
-            challengeId,
-            user.UserId,
-            publicKeyHex,
-            message,
-            createdUtc,
-            expiresUtc,
-            null);
-
-        await _repository.InsertChallengeAsync(challenge, cancellationToken).ConfigureAwait(false);
-        return new MinerChallengeResult(challengeId, message, expiresUtc);
-    }
-
-    public async Task<MinerVerificationResult> VerifyChallengeAsync(PoolUser user, string challengeId, string signatureHex, PoolSettings settings, CancellationToken cancellationToken = default)
-    {
-        var challenge = await _repository.GetChallengeByIdAsync(challengeId, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("Challenge not found.");
-
-        if (!string.Equals(challenge.UserId, user.UserId, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(user.CustodianPublicKeyHex))
         {
-            throw new InvalidOperationException("Challenge does not belong to this account.");
+            throw new InvalidOperationException("Create a custodian wallet keypair first.");
         }
 
-        if (challenge.ConsumedUtc is not null)
-        {
-            throw new InvalidOperationException("Challenge already used.");
-        }
-
-        if (challenge.ExpiresUtc <= DateTimeOffset.UtcNow)
-        {
-            throw new InvalidOperationException("Challenge expired.");
-        }
-
-        if (!KeyUtility.VerifyEd25519Signature(challenge.PublicKeyHex, challenge.Message, signatureHex))
-        {
-            _logger.Warn("Auth", $"Rejected miner signature for user={user.Username} pub={challenge.PublicKeyHex}");
-            throw new InvalidOperationException("Invalid signature.");
-        }
-
-        var rawToken = HexUtility.CreateTokenHex(32);
         var now = DateTimeOffset.UtcNow;
         var existing = await _repository.GetMinerByUserIdAsync(user.UserId, cancellationToken).ConfigureAwait(false);
+        var publicKeyHex = HexUtility.NormalizeLower(user.CustodianPublicKeyHex, 32);
+        var rawToken = existing is not null &&
+                       string.Equals(existing.PublicKeyHex, publicKeyHex, StringComparison.Ordinal) &&
+                       !string.IsNullOrWhiteSpace(existing.ApiTokenText)
+            ? existing.ApiTokenText!
+            : HexUtility.CreateTokenHex(32);
+
         var miner = new MinerRecord(
             existing?.MinerId ?? Guid.NewGuid().ToString("N"),
             user.UserId,
-            challenge.PublicKeyHex,
+            publicKeyHex,
             existing?.ShareDifficulty ?? settings.DefaultShareDifficulty,
             HexUtility.HashSha256Hex(rawToken),
             rawToken,
@@ -265,10 +343,8 @@ public sealed class MinerAuthService
             existing?.LastShareUtc);
 
         await _repository.UpsertMinerAsync(miner, cancellationToken).ConfigureAwait(false);
-        await _repository.SyncVerifiedDepositSenderToMinerKeyAsync(user.UserId, challenge.PublicKeyHex, cancellationToken).ConfigureAwait(false);
-        await _repository.UpdateUserWithdrawalAddressAsync(user.UserId, challenge.PublicKeyHex, cancellationToken).ConfigureAwait(false);
-        await _repository.ConsumeChallengeAsync(challenge.ChallengeId, now, cancellationToken).ConfigureAwait(false);
-        return new MinerVerificationResult(miner, rawToken);
+        await _repository.UpdateUserWithdrawalAddressAsync(user.UserId, publicKeyHex, cancellationToken).ConfigureAwait(false);
+        return new MinerBindingResult(miner, rawToken);
     }
 
     public async Task<MinerRecord?> GetMinerFromApiTokenAsync(string? rawToken, CancellationToken cancellationToken = default)

@@ -62,7 +62,9 @@ public sealed record PoolUser(
     string? WithdrawalAddressHex,
     long LastObservedDepositAtomic,
     string LastObservedDepositHeightText,
-    DateTimeOffset CreatedUtc);
+    DateTimeOffset CreatedUtc,
+    string? CustodianPublicKeyHex = null,
+    string? ProtectedCustodianPrivateKeyHex = null);
 
 public sealed record UserSession(
     string SessionId,
@@ -83,15 +85,6 @@ public sealed record MinerRecord(
     DateTimeOffset VerifiedUtc,
     DateTimeOffset LastJobUtc,
     DateTimeOffset? LastShareUtc);
-
-public sealed record MinerChallenge(
-    string ChallengeId,
-    string UserId,
-    string PublicKeyHex,
-    string Message,
-    DateTimeOffset CreatedUtc,
-    DateTimeOffset ExpiresUtc,
-    DateTimeOffset? ConsumedUtc);
 
 public sealed record DepositSenderChallenge(
     string ChallengeId,
@@ -230,6 +223,32 @@ public sealed record WithdrawalRequestRecord(
     string? ExternalTxId,
     DateTimeOffset RequestedUtc,
     DateTimeOffset UpdatedUtc);
+
+public sealed record WalletContactRecord(
+    string ContactId,
+    string UserId,
+    string Label,
+    string AddressHex,
+    DateTimeOffset CreatedUtc);
+
+public sealed record QadoPayContactRecord(
+    string ContactId,
+    string UserId,
+    string Label,
+    string Username,
+    DateTimeOffset CreatedUtc);
+
+public sealed record WalletTransactionRecord(
+    string WalletTransactionId,
+    string UserId,
+    string Direction,
+    string CounterpartyAddressHex,
+    long AmountAtomic,
+    long FeeAtomic,
+    string? Note,
+    string? TxId,
+    string Status,
+    DateTimeOffset CreatedUtc);
 
 public sealed record DashboardSnapshot(
     bool ServerRunning,

@@ -8,11 +8,77 @@ public sealed record LoginRequest(string Username, string Password);
 
 public sealed record AuthResponse(string Username, string SessionToken, string DepositAddress);
 
-public sealed record ChallengeRequest(string PublicKey);
-
-public sealed record VerifyChallengeRequest(string ChallengeId, string Signature);
-
 public sealed record MinerAuthResponse(string PublicKey, string ApiToken, double ShareDifficulty);
+
+public sealed record WalletKeyPairResponse(string PublicKey);
+
+public sealed record WalletSendRequest(string Address, string Amount, string Fee, string? Note);
+
+public sealed record WalletSendResponse(string TxId, string Address, string Amount, string Fee);
+
+public sealed record WalletAddressBookRequest(string Label, string Address);
+
+public sealed record WalletAddressBookItemResponse(
+    string ContactId,
+    string Label,
+    string Address,
+    DateTimeOffset CreatedUtc);
+
+public sealed record QadoPayAddressBookRequest(string Label, string Username);
+
+public sealed record QadoPayAddressBookItemResponse(
+    string ContactId,
+    string Label,
+    string Username,
+    DateTimeOffset CreatedUtc);
+
+public sealed record QadoPayPaymentItemResponse(
+    string LedgerEntryId,
+    string Direction,
+    string Username,
+    string Amount,
+    string? Note,
+    DateTimeOffset CreatedUtc);
+
+public sealed record QadoPayLastPaymentResponse(
+    string Direction,
+    string Username,
+    string Amount,
+    DateTimeOffset CreatedUtc);
+
+public sealed record QadoPayOverviewResponse(
+    string SentToday,
+    string ReceivedToday,
+    string NetToday,
+    QadoPayLastPaymentResponse? LastPayment);
+
+public sealed record QadoPaySummaryResponse(
+    QadoPayAddressBookItemResponse[] AddressBook,
+    QadoPayPaymentItemResponse[] Payments,
+    QadoPayOverviewResponse Overview);
+
+public sealed record WalletTransactionItemResponse(
+    string TransactionId,
+    string Direction,
+    string Counterparty,
+    string Amount,
+    string Fee,
+    string? Note,
+    string? TxId,
+    string Status,
+    DateTimeOffset CreatedUtc);
+
+public sealed record WalletBalanceResponse(
+    string Available,
+    int PendingOutgoingCount,
+    int PendingIncomingCount);
+
+public sealed record WalletSummaryResponse(
+    bool HasKeyPair,
+    string? PublicKey,
+    WalletBalanceResponse Balance,
+    WalletTransactionItemResponse[] Transactions,
+    WalletAddressBookItemResponse[] AddressBook);
 
 public sealed record MiningShareSubmitRequest(string JobId, string Nonce, string? Timestamp);
 
@@ -41,6 +107,7 @@ public sealed record PoolJobResponse(
 public sealed record BalanceDto(
     string Available,
     string PendingWithdrawal,
+    string PendingDeposits,
     string TotalMined,
     string TotalDeposited,
     string TotalWithdrawn,
@@ -51,9 +118,11 @@ public sealed record MeResponse(
     string DepositAddress,
     string? WithdrawalAddress,
     BalanceDto Balance,
+    string PoolFeePercent,
     string? MinerPublicKey,
     double? MinerDifficulty,
-    string? MinerApiToken);
+    string? MinerApiToken,
+    string? CustodianPublicKey = null);
 
 public sealed record WithdrawResponse(string WithdrawalId, string Status, string? TxId, string SentAmount, string Fee);
 

@@ -74,7 +74,6 @@ public sealed class PoolServerHost
         _runningSettingsSnapshot.ShareTargetSecondsMin = settings.ShareTargetSecondsMin;
         _runningSettingsSnapshot.ShareTargetSecondsMax = settings.ShareTargetSecondsMax;
         _runningSettingsSnapshot.ShareJobLifetimeSeconds = settings.ShareJobLifetimeSeconds;
-        _runningSettingsSnapshot.ChallengeLifetimeSeconds = settings.ChallengeLifetimeSeconds;
         _runningSettingsSnapshot.SessionLifetimeHours = settings.SessionLifetimeHours;
         _runningSettingsSnapshot.PoolFeeBasisPoints = settings.PoolFeeBasisPoints;
         _runningSettingsSnapshot.AccountRegistrationEnabled = settings.AccountRegistrationEnabled;
@@ -121,6 +120,8 @@ public sealed class PoolServerHost
         builder.Services.AddSingleton<SessionService>();
         builder.Services.AddSingleton<UserAccountService>();
         builder.Services.AddSingleton<MinerAuthService>();
+        builder.Services.AddSingleton<CustodianWalletService>();
+        builder.Services.AddSingleton<QadoPayService>();
         builder.Services.AddSingleton<LedgerService>();
         builder.Services.AddSingleton<DepositMonitorService>();
         builder.Services.AddSingleton<MiningJobService>();
@@ -201,6 +202,24 @@ public sealed class PoolServerHost
         {
             PrepareHtmlResponse(context.Response);
             await context.Response.SendFileAsync(Path.Combine(_paths.WebRootPath, "dashboard.html")).ConfigureAwait(false);
+        });
+
+        app.MapGet("/wallet", async context =>
+        {
+            PrepareHtmlResponse(context.Response);
+            await context.Response.SendFileAsync(Path.Combine(_paths.WebRootPath, "wallet.html")).ConfigureAwait(false);
+        });
+
+        app.MapGet("/qado-pay", async context =>
+        {
+            PrepareHtmlResponse(context.Response);
+            await context.Response.SendFileAsync(Path.Combine(_paths.WebRootPath, "qado-pay.html")).ConfigureAwait(false);
+        });
+
+        app.MapGet("/miner-binding", context =>
+        {
+            context.Response.Redirect("/dashboard");
+            return Task.CompletedTask;
         });
 
         PoolApi.Map(app);

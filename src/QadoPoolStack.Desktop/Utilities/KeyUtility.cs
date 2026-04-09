@@ -1,4 +1,3 @@
-using System.Text;
 using NSec.Cryptography;
 
 namespace QadoPoolStack.Desktop.Utilities;
@@ -40,14 +39,5 @@ public static class KeyUtility
             ExportPolicy = KeyExportPolicies.AllowPlaintextExport
         });
         return Algorithm.Sign(key, message);
-    }
-
-    public static bool VerifyEd25519Signature(string publicKeyHex, string message, string signatureHex)
-    {
-        var publicKeyBytes = HexUtility.Parse(publicKeyHex, 32);
-        var signatureBytes = HexUtility.Parse(signatureHex, 64);
-        var payload = Encoding.UTF8.GetBytes(message);
-        var publicKey = PublicKey.Import(Algorithm, publicKeyBytes, KeyBlobFormat.RawPublicKey);
-        return Algorithm.Verify(publicKey, payload, signatureBytes);
     }
 }

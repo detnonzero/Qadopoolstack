@@ -38,8 +38,6 @@ public sealed class PoolSettings
 
     public int ShareJobLifetimeSeconds { get; set; } = 30;
 
-    public int ChallengeLifetimeSeconds { get; set; } = 300;
-
     public int SessionLifetimeHours { get; set; } = 168;
 
     public int AuthRateLimitPerMinute { get; set; } = 20;
@@ -51,6 +49,8 @@ public sealed class PoolSettings
     public int ShareRateLimitPerMinute { get; set; } = 240;
 
     public int PoolFeeBasisPoints { get; set; } = 100;
+
+    public string NewAccountCreditAmount { get; set; } = "0.0";
 
     public bool AccountRegistrationEnabled { get; set; } = true;
 
@@ -80,13 +80,13 @@ public sealed class PoolSettings
             ShareTargetSecondsMin = ShareTargetSecondsMin,
             ShareTargetSecondsMax = ShareTargetSecondsMax,
             ShareJobLifetimeSeconds = ShareJobLifetimeSeconds,
-            ChallengeLifetimeSeconds = ChallengeLifetimeSeconds,
             SessionLifetimeHours = SessionLifetimeHours,
             AuthRateLimitPerMinute = AuthRateLimitPerMinute,
             UserApiRateLimitPerMinute = UserApiRateLimitPerMinute,
             MinerRequestRateLimitPerMinute = MinerRequestRateLimitPerMinute,
             ShareRateLimitPerMinute = ShareRateLimitPerMinute,
             PoolFeeBasisPoints = PoolFeeBasisPoints,
+            NewAccountCreditAmount = NewAccountCreditAmount,
             AccountRegistrationEnabled = AccountRegistrationEnabled,
             AddressPollSeconds = AddressPollSeconds,
             DepositMinConfirmations = DepositMinConfirmations,
@@ -117,13 +117,13 @@ public sealed class PoolSettings
                ShareTargetSecondsMin == other.ShareTargetSecondsMin &&
                ShareTargetSecondsMax == other.ShareTargetSecondsMax &&
                ShareJobLifetimeSeconds == other.ShareJobLifetimeSeconds &&
-               ChallengeLifetimeSeconds == other.ChallengeLifetimeSeconds &&
                SessionLifetimeHours == other.SessionLifetimeHours &&
                AuthRateLimitPerMinute == other.AuthRateLimitPerMinute &&
                UserApiRateLimitPerMinute == other.UserApiRateLimitPerMinute &&
                MinerRequestRateLimitPerMinute == other.MinerRequestRateLimitPerMinute &&
                ShareRateLimitPerMinute == other.ShareRateLimitPerMinute &&
                PoolFeeBasisPoints == other.PoolFeeBasisPoints &&
+               string.Equals(NewAccountCreditAmount, other.NewAccountCreditAmount, StringComparison.Ordinal) &&
                AccountRegistrationEnabled == other.AccountRegistrationEnabled &&
                AddressPollSeconds == other.AddressPollSeconds &&
                DepositMinConfirmations == other.DepositMinConfirmations &&

@@ -344,6 +344,7 @@ public partial class MainWindow : Window
         DefaultDifficultyTextBox.Text = DifficultyCalibration.ToCalibratedDifficulty(settings.DefaultShareDifficulty, settings).ToString("0.00", CultureInfo.InvariantCulture);
         ShareRateLimitTextBox.Text = settings.ShareRateLimitPerMinute.ToString(CultureInfo.InvariantCulture);
         PoolFeeTextBox.Text = settings.PoolFeeBasisPoints.ToString(CultureInfo.InvariantCulture);
+        NewAccountCreditTextBox.Text = settings.NewAccountCreditAmount;
     }
 
     private Configuration.PoolSettings ReadSettingsFromForm()
@@ -361,7 +362,24 @@ public partial class MainWindow : Window
         settings.DefaultShareDifficulty = DifficultyCalibration.ToRawDifficulty(ParseDouble(DefaultDifficultyTextBox.Text, "Default share difficulty"), settings);
         settings.ShareRateLimitPerMinute = ParseInt(ShareRateLimitTextBox.Text, "Share rate limit");
         settings.PoolFeeBasisPoints = ParseInt(PoolFeeTextBox.Text, "Pool fee");
+        settings.NewAccountCreditAmount = NormalizeQadoAmountText(NewAccountCreditTextBox.Text, "New account credit");
         return settings;
+    }
+
+    private static string NormalizeQadoAmountText(string? text, string fieldName)
+    {
+        var trimmed = (text ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+        {
+            return "0.0";
+        }
+
+        if (!AmountUtility.TryParseToAtomic(trimmed, out var atomic))
+        {
+            throw new InvalidOperationException($"{fieldName} must be a valid non-negative QADO amount.");
+        }
+
+        return AmountUtility.FormatAtomic(atomic);
     }
 
     private static int ParseInt(string? text, string fieldName)

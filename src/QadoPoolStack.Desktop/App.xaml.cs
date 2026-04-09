@@ -341,7 +341,7 @@ public partial class App : Application
         var letsEncryptService = new LetsEncryptService(paths, secretProtector, acmeChallengeStore, logger);
         var serverHost = new PoolServerHost(paths, repository, secretProtector, logger, acmeChallengeStore);
 
-        _ = new UserAccountService(repository, passwordHasher, secretProtector, sessionService);
+        _ = new UserAccountService(repository, passwordHasher, secretProtector, sessionService, nodeClient, logger);
 
         return new DesktopRuntime(paths, settingsStore, repository, serverHost, letsEncryptService, ledgerService, logger, secretProtector);
     }

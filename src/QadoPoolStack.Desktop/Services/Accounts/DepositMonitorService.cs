@@ -49,7 +49,7 @@ public sealed class DepositMonitorService
             poolAddress,
             existingState?.NextCursor,
             200,
-            _settings.DepositMinConfirmations,
+            0,
             cancellationToken).ConfigureAwait(false);
 
         await _repository.ExecuteInTransactionAsync(async (connection, transaction) =>
@@ -57,7 +57,7 @@ public sealed class DepositMonitorService
             foreach (var item in response.Items)
             {
                 var depositEvent = MapIncomingDepositEvent(item, DateTimeOffset.UtcNow);
-                await _repository.InsertIncomingDepositEventIfMissingAsync(depositEvent, connection, transaction, cancellationToken).ConfigureAwait(false);
+                await _repository.UpsertIncomingDepositEventAsync(depositEvent, connection, transaction, cancellationToken).ConfigureAwait(false);
             }
 
             var nextCursor = string.IsNullOrWhiteSpace(response.NextCursor)
@@ -117,26 +117,19 @@ public sealed class DepositMonitorService
             return;
         }
 
-        var verifiedSenders = await _repository.GetVerifiedDepositSendersByPublicKeysAsync(candidateAddresses, cancellationToken).ConfigureAwait(false);
-        if (verifiedSenders.Count == 0)
-        {
-            return;
-        }
-
-        var users = await _repository.GetUsersByIdsAsync(verifiedSenders.Select(sender => sender.UserId).Distinct(StringComparer.Ordinal).ToArray(), cancellationToken).ConfigureAwait(false);
+        var users = await _repository.GetUsersByCustodianPublicKeysAsync(candidateAddresses, cancellationToken).ConfigureAwait(false);
         if (users.Count == 0)
         {
             return;
         }
 
-        var userLookup = users.ToDictionary(user => user.UserId, StringComparer.Ordinal);
-        var senderLookup = verifiedSenders
-            .Where(sender => userLookup.ContainsKey(sender.UserId))
-            .ToDictionary(sender => sender.PublicKeyHex, StringComparer.Ordinal);
+        var senderLookup = users
+            .Where(user => !string.IsNullOrWhiteSpace(user.CustodianPublicKeyHex))
+            .ToDictionary(user => HexUtility.NormalizeLower(user.CustodianPublicKeyHex!, 32), StringComparer.Ordinal);
 
         foreach (var pendingEvent in pendingEvents)
         {
-            if (!string.Equals(pendingEvent.Status, "confirmed", StringComparison.OrdinalIgnoreCase))
+            if (!IsReadyToCredit(pendingEvent, _settings.DepositMinConfirmations))
             {
                 continue;
             }
@@ -147,62 +140,61 @@ public sealed class DepositMonitorService
                 continue;
             }
 
-            var matchedSenders = senderCandidates
+            var matchedUsers = senderCandidates
                 .Where(senderLookup.ContainsKey)
                 .Select(address => senderLookup[address])
-                .DistinctBy(sender => sender.SenderId)
+                .DistinctBy(user => user.UserId)
                 .ToArray();
 
-            if (matchedSenders.Length == 0)
+            if (matchedUsers.Length == 0)
             {
                 continue;
             }
 
-            var eligibleSenders = matchedSenders
-                .Where(sender => userLookup.TryGetValue(sender.UserId, out var user) && pendingEvent.TimestampUtc >= user.CreatedUtc)
+            var eligibleUsers = matchedUsers
+                .Where(user => pendingEvent.TimestampUtc >= user.CreatedUtc)
                 .ToArray();
 
-            if (eligibleSenders.Length == 0)
+            if (eligibleUsers.Length == 0)
             {
-                if (senderCandidates.All(senderLookup.ContainsKey))
+                if (matchedUsers.Length > 0)
                 {
-                    await IgnoreHistoricalPendingEventAsync(pendingEvent, matchedSenders, userLookup, cancellationToken).ConfigureAwait(false);
+                    await IgnoreHistoricalPendingEventAsync(pendingEvent, matchedUsers, cancellationToken).ConfigureAwait(false);
                 }
 
                 continue;
             }
 
-            var distinctUsers = eligibleSenders
-                .Select(sender => sender.UserId)
+            var distinctUsers = eligibleUsers
+                .Select(user => user.UserId)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
 
             if (distinctUsers.Length != 1)
             {
-                LogAmbiguousEvent(pendingEvent, eligibleSenders);
+                LogAmbiguousEvent(pendingEvent, eligibleUsers);
                 continue;
             }
 
-            var selectedSender = eligibleSenders[0];
+            var selectedUser = eligibleUsers[0];
             var credited = await _repository.TryCreditIncomingDepositAsync(
                 pendingEvent,
-                selectedSender.UserId,
-                selectedSender.PublicKeyHex,
+                selectedUser.UserId,
+                HexUtility.NormalizeLower(selectedUser.CustodianPublicKeyHex!, 32),
                 cancellationToken).ConfigureAwait(false);
 
             if (credited)
             {
                 _logger.Info(
                     "Deposit",
-                    $"Credited {AmountUtility.FormatAtomic(pendingEvent.AmountAtomic)} QADO from {selectedSender.PublicKeyHex} to user_id={selectedSender.UserId} via event={pendingEvent.EventId}");
+                    $"Credited {AmountUtility.FormatAtomic(pendingEvent.AmountAtomic)} QADO from custodian={selectedUser.CustodianPublicKeyHex} to user={selectedUser.Username} via event={pendingEvent.EventId}");
             }
         }
     }
 
     private async Task IgnoreHistoricalPendingEventAsync(
         IncomingDepositEvent pendingEvent,
-        IReadOnlyCollection<VerifiedDepositSender> matchedSenders,
-        IReadOnlyDictionary<string, PoolUser> userLookup,
+        IReadOnlyCollection<PoolUser> matchedUsers,
         CancellationToken cancellationToken)
     {
         await _repository.IgnoreIncomingDepositEventAsync(
@@ -217,26 +209,22 @@ public sealed class DepositMonitorService
 
         var matches = string.Join(
             ", ",
-            matchedSenders.Select(sender =>
-            {
-                var user = userLookup[sender.UserId];
-                return $"{user.Username}:{sender.PublicKeyHex}:created={user.CreatedUtc:O}";
-            }));
+            matchedUsers.Select(user => $"{user.Username}:{user.CustodianPublicKeyHex}:created={user.CreatedUtc:O}"));
 
         _logger.Warn(
             "Deposit",
             $"Ignored incoming event {pendingEvent.EventId} because it predates the matched account creation timestamp. event_ts={pendingEvent.TimestampUtc:O}; matches={matches}");
     }
 
-    private void LogAmbiguousEvent(IncomingDepositEvent pendingEvent, IReadOnlyCollection<VerifiedDepositSender> matchedSenders)
+    private void LogAmbiguousEvent(IncomingDepositEvent pendingEvent, IReadOnlyCollection<PoolUser> matchedUsers)
     {
         if (!_ambiguousEventIdsLogged.Add(pendingEvent.EventId))
         {
             return;
         }
 
-        var users = string.Join(", ", matchedSenders.Select(sender => $"{sender.UserId}:{sender.PublicKeyHex}"));
-        _logger.Warn("Deposit", $"Skipped incoming event {pendingEvent.EventId} because multiple verified users matched its sender set. Matches: {users}");
+        var users = string.Join(", ", matchedUsers.Select(user => $"{user.Username}:{user.CustodianPublicKeyHex}"));
+        _logger.Warn("Deposit", $"Skipped incoming event {pendingEvent.EventId} because multiple users matched the sender address. Matches: {users}");
     }
 
     private static IncomingDepositEvent MapIncomingDepositEvent(QadoIncomingAddressEvent item, DateTimeOffset observedUtc)
@@ -280,6 +268,21 @@ public sealed class DepositMonitorService
         return candidates
             .Distinct(StringComparer.Ordinal)
             .ToList();
+    }
+
+    private static bool IsReadyToCredit(IncomingDepositEvent depositEvent, int minConfirmations)
+    {
+        if (!string.Equals(depositEvent.Status, "confirmed", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!int.TryParse(depositEvent.ConfirmationsText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var confirmations))
+        {
+            confirmations = 0;
+        }
+
+        return confirmations >= Math.Max(0, minConfirmations);
     }
 
     private static string[] NormalizeSenderAddresses(string? fromAddress, IReadOnlyCollection<string> fromAddresses)

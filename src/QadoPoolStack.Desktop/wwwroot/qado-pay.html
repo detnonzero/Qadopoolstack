@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qado Pool Qado Pay</title>
+  <link rel="stylesheet" href="/app.css?v=20260405a">
+</head>
+<body data-page="qado-pay">
+  <div class="backdrop"></div>
+  <main class="shell">
+    <header class="topbar">
+      <div class="topbar-brand">
+        <p class="eyebrow">Qado Pool</p>
+        <strong>Pool portal</strong>
+      </div>
+      <div class="topbar-menu">
+        <button id="menuToggleButton" class="profile-toggle" type="button" aria-label="Open menu" aria-expanded="false">
+          <span id="profileGlyph">U</span>
+        </button>
+        <div id="profileMenu" class="card profile-menu hidden">
+          <p class="profile-menu-label">Signed in as</p>
+          <strong id="menuUsername">-</strong>
+          <a id="navDashboard" class="menu-link" href="/dashboard">Pool mining</a>
+          <a id="navWallet" class="menu-link" href="/wallet">Wallet</a>
+          <a id="navQadoPay" class="menu-link" href="/qado-pay">Qado Pay</a>
+          <button id="profileSignOutButton" class="secondary-button menu-signout" type="button">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="hero page-hero">
+      <h1>Qado Pay</h1>
+      <p class="lede">Internal pool payments between usernames.</p>
+    </section>
+
+    <p id="notice" class="notice page-notice hidden" aria-live="polite"></p>
+
+    <section class="grid">
+      <article class="card wide">
+        <h2>Payment</h2>
+        <p class="muted">Internal pool payment to another username.</p>
+        <form id="transferForm">
+          <label>Recipient username<input name="username" required></label>
+          <label>Amount<input name="amount" placeholder="1.25" required></label>
+          <label>Note<input name="note" placeholder="optional note"></label>
+          <button type="submit">Send payment</button>
+        </form>
+      </article>
+
+      <article class="card summary-card">
+        <h2>Qado Pay summary</h2>
+        <div class="summary-metrics">
+          <div><span>Available (QADO)</span><strong id="qadoPaySummaryAvailable">0.0</strong></div>
+          <div><span>Sent today (QADO)</span><strong id="qadoPaySentToday">0.0</strong></div>
+          <div><span>Received today (QADO)</span><strong id="qadoPayReceivedToday">0.0</strong></div>
+          <div><span>Net today (QADO)</span><strong id="qadoPayNetToday">0.0</strong></div>
+        </div>
+        <div class="summary-last-payment">
+          <span>Last payment</span>
+          <strong id="qadoPayLastPaymentValue">No payments yet.</strong>
+          <p id="qadoPayLastPaymentMeta" class="history-note">Send or receive an intra-pool payment to see it here.</p>
+        </div>
+      </article>
+
+      <article class="card full">
+        <h2>Address book</h2>
+        <p class="muted">Saved pool usernames are checked against existing pool accounts before they are stored.</p>
+        <form id="qadoPayAddressBookForm" class="inline-form address-book-form">
+          <label>Label<input name="label" placeholder="Teammate" required></label>
+          <label>Username<input name="username" placeholder="pool username" required></label>
+          <button type="submit">Save user</button>
+        </form>
+        <div id="qadoPayAddressBookList" class="address-book-list">
+          <p class="history-empty">No saved usernames yet.</p>
+        </div>
+      </article>
+
+      <article class="card full">
+        <h2>Payments</h2>
+        <div id="qadoPayPaymentsList" class="history-list">
+          <p class="history-empty">No Qado Pay payments yet.</p>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script src="/app.js?v=20260405a" defer></script>
+</body>
+</html>
